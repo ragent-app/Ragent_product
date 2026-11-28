@@ -254,4 +254,56 @@ class ConnectionStatusAndErrorUiTest {
         }
         assertEquals(0, rule.onAllNodesWithTag("composer-runtime-retry").fetchSemanticsNodes().size)
     }
+
+    @Test
+    fun reconnectingChatSuppressesBottomStaleHistoryBarWhileKeepingConnectedFallback() {
+        var state by mutableStateOf(
+            WorkbenchUiState(
+                destination = AgentoDestination.Home,
+                chatOpen = true,
+                sessionId = "s1",
+                connection = AgentConnectionStatus.Reconnecting,
+                activeRemoteTargetId = "pc-a",
+                visibleHistoryStale = true,
+                runtimeModel = "gpt-5",
+                timelineItems = listOf(
+                    TimelineItem.Message("u1", 1, TimelineRole.User, "hi", true),
+                ),
+            ),
+        )
+        rule.setContent {
+            RagentTheme(motionPreference = MotionPreference.None) {
+                WorkbenchScreen(
+                    state = state,
+                    windowSizeClass = AgentoWindowSizeClass.Compact,
+                    onEvent = {},
+                )
+            }
+        }
+
+        rule.onNodeWithTag("connection-status-banner").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithText("Some newer messages may not be shown.").fetchSemanticsNodes().size)
+        assertFalse(
+            shouldShowChatStaleHistoryBar(
+                hasTurns = true,
+                visibleHistoryStale = true,
+                showConnectionBanner = true,
+                connection = AgentConnectionStatus.Reconnecting,
+            ),
+        )
+
+        rule.runOnIdle {
+            state = state.copy(connection = AgentConnectionStatus.Connected)
+        }
+        assertEquals(0, rule.onAllNodesWithTag("connection-status-banner").fetchSemanticsNodes().size)
+        rule.onNodeWithText("Some newer messages may not be shown.").assertIsDisplayed()
+        assertTrue(
+            shouldShowChatStaleHistoryBar(
+                hasTurns = true,
+                visibleHistoryStale = true,
+                showConnectionBanner = false,
+                connection = AgentConnectionStatus.Connected,
+            ),
+        )
+    }
 }

@@ -43,7 +43,7 @@ internal fun pickerForegroundProgress(presence: Float): Float = pickerWidthProgr
 
 internal fun pickerPresenceSpec(preference: MotionPreference): FiniteAnimationSpec<Float> = when (preference) {
     MotionPreference.Full -> spring(dampingRatio = AgentoSprings.DAMPING_BOUNCELESS,
-        stiffness = AgentoSprings.STIFFNESS_HIGH, visibilityThreshold = .002f)
+        stiffness = AgentoSprings.STIFFNESS_HIGH, visibilityThreshold = .0005f)
     MotionPreference.Reduced -> tween(120, easing = FastOutSlowInEasing)
     MotionPreference.None -> tween(0)
 }

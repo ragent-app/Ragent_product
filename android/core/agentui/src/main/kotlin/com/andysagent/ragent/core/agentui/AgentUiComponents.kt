@@ -277,7 +277,11 @@ private fun UserMessageAttachmentStrip(
                         ) else Modifier
                     ),
                 shape = RoundedCornerShape(14.dp),
-                color = if (isDark) AgentoFrostedTokens.SurfaceLevel1 else colors.surfaceHigh,
+                color = if (isDark) {
+                    if (colors.surfaceHigh.alpha >= 0.99f) colors.surfaceHigh else Color(0xFF1C1C22)
+                } else {
+                    if (colors.surfaceHigh.alpha >= 0.99f) colors.surfaceHigh else Color(0xFFE9EBF1)
+                },
                 contentColor = colors.primaryContent,
                 border = attachmentBorder,
                 shadowElevation = 0.dp,
@@ -348,7 +352,13 @@ fun UserMessage(
     modifier: Modifier = Modifier,
     attachments: List<UserMessageAttachment> = emptyList(),
     timestamp: String? = null,
-    bubbleColor: Color = if (LocalRagentColors.current.canvas.red < 0.5f) Ragentolors.SurfaceLevel1 else LocalRagentColors.current.surfaceHigh,
+    bubbleColor: Color = LocalRagentColors.current.let { c ->
+        if (c.canvas.red < 0.5f) {
+            if (c.surfaceHigh.alpha >= 0.99f) c.surfaceHigh else Color(0xFF1C1C22)
+        } else {
+            if (c.surfaceHigh.alpha >= 0.99f) c.surfaceHigh else Color(0xFFE9EBF1)
+        }
+    },
     canEditResend: Boolean = false,
     onCopy: (() -> Unit)? = null,
     onBranch: (() -> Unit)? = null,
@@ -778,7 +788,7 @@ fun AgentStreamingMessage(
                 AgentMarkdown(
                     markdown = visibleText,
                     isStreaming = streaming,
-                    latestGraphemeColor = colors.secondaryContent.takeIf {
+                    latestGraphemeColor = colors.accentPrimary.copy(alpha = 0.72f).takeIf {
                         motion.preference == MotionPreference.Full
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -1000,7 +1010,7 @@ fun EffortSliderPopover(
     ComposerRuntimePickerPopover(
         expanded = expanded,
         onDismiss = onDismiss,
-        title = stringResource(if (stopLabels.isEmpty()) R.string.agentui_model else R.string.agentui_thinking_effort),
+        title = if (stopLabels.isEmpty()) "" else stringResource(R.string.agentui_thinking_effort),
         supportingText = selectedLabel,
         backdropLayer = backdropLayer,
         backdropOrigin = backdropOrigin,
@@ -1344,13 +1354,18 @@ internal fun ComposerPickerPageFrame(
 ) {
     val colors = LocalRagentColors.current
     val isDark = colors.canvas.red < 0.5f
+    val showHeader = !(compactHeader && title.isEmpty() && onNavigateUp == null)
                 Column(modifier = modifier.fillMaxWidth()) {
+                    if (showHeader) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = if (compactHeader) 36.dp else 56.dp)
+                            .heightIn(min = if (compactHeader) (if (supportingText.isEmpty()) 30.dp else 36.dp) else 56.dp)
                             .pickerItemReveal(heading = true)
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                            .padding(
+                                horizontal = 10.dp,
+                                vertical = if (compactHeader && supportingText.isEmpty()) 2.dp else 4.dp,
+                            ),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (onNavigateUp != null) {
@@ -1385,13 +1400,15 @@ internal fun ComposerPickerPageFrame(
                                 style = MaterialTheme.typography.titleSmall,
                                 color = colors.primaryContent,
                             )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = supportingText,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = colors.secondaryContent,
-                            )
-                            Spacer(Modifier.width(6.dp))
+                            if (supportingText.isNotEmpty()) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = supportingText,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.secondaryContent,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
                         } else Column(Modifier.weight(1f)) {
                             Text(
                                 text = title,
@@ -1401,13 +1418,15 @@ internal fun ComposerPickerPageFrame(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text(
-                                text = supportingText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.secondaryContent,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            if (supportingText.isNotEmpty()) {
+                                Text(
+                                    text = supportingText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.secondaryContent,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                     if (!compactHeader) Box(
@@ -1416,12 +1435,13 @@ internal fun ComposerPickerPageFrame(
                             .height(0.5.dp)
                             .background(colors.primaryContent.copy(alpha = if (isDark) 0.12f else 0.08f)),
                     )
+                    }
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 286.dp)
                             .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 6.dp, vertical = if (compactHeader) 2.dp else 6.dp),
+                            .padding(horizontal = 6.dp, vertical = if (!showHeader) 4.dp else if (compactHeader) 2.dp else 6.dp),
                         verticalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
                         content()
@@ -3269,29 +3289,41 @@ fun ToolCallCard(
                 animationSpec = tween(motion.duration(160)),
             ),
         ) {
+            val isFailed = state.status == AgentOperationStatus.Failed
             val termBg = if (isDark) Color(0xFF0D1117).copy(alpha = 0.92f) else Color(0xFF161B22).copy(alpha = 0.95f)
-            val termBorder = BorderStroke(
-                width = 0.75.dp,
-                brush = if (isDark) AgentoFrostedTokens.SpecularBorderDark else AgentoFrostedTokens.SpecularBorderLight,
-            )
+            val termBorder = if (isFailed) {
+                BorderStroke(0.75.dp, colors.error.copy(alpha = 0.42f))
+            } else {
+                BorderStroke(
+                    width = 0.75.dp,
+                    brush = if (isDark) AgentoFrostedTokens.SpecularBorderDark else AgentoFrostedTokens.SpecularBorderLight,
+                )
+            }
+            val clipboardManager = LocalClipboardManager.current
+            val copyScope = rememberCoroutineScope()
+            var copiedDetail by remember(state.id) { mutableStateOf(false) }
             Surface(
                 color = if (state.kind == AgentOperationKind.Command) termBg else (if (isDark) AgentoFrostedTokens.SurfaceLevel1 else AgentoFrostedTokens.LightSurfaceLevel1),
                 shape = RoundedCornerShape(12.dp),
                 border = termBorder,
                 contentColor = colors.primaryContent,
             ) {
+                Box(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = AgentoSpacing.Standard, end = AgentoSpacing.Standard, bottom = 10.dp, top = 4.dp),
+                        .padding(start = AgentoSpacing.Standard, end = if (isFailed && detailText.isNotBlank()) 44.dp else AgentoSpacing.Standard, bottom = 10.dp, top = 4.dp),
                 ) {
                     Box(
                         modifier = Modifier
                             .width(2.5.dp)
                             .heightIn(min = 20.dp)
                             .background(
-                                if (state.kind == AgentOperationKind.Command) LocalRagentColors.current.accentPrimary.copy(alpha = 0.6f)
-                                else colors.primaryContent.copy(alpha = 0.15f),
+                                when {
+                                    isFailed -> colors.error.copy(alpha = 0.72f)
+                                    state.kind == AgentOperationKind.Command -> LocalRagentColors.current.accentPrimary.copy(alpha = 0.6f)
+                                    else -> colors.primaryContent.copy(alpha = 0.15f)
+                                },
                                 RoundedCornerShape(1.dp),
                             ),
                     )
@@ -3338,6 +3370,35 @@ fun ToolCallCard(
                             )
                         }
                     }
+                }
+                if (isFailed && detailText.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .agentoPressScale(
+                                pressedScale = 0.9f,
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(detailText))
+                                    copiedDetail = true
+                                    copyScope.launch {
+                                        delay(1800)
+                                        copiedDetail = false
+                                    }
+                                },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AgentoWebIcon(
+                            glyph = if (copiedDetail) AgentoWebGlyph.Check else AgentoWebGlyph.Copy,
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp),
+                            tint = if (copiedDetail) colors.statusSuccess else colors.secondaryContent,
+                        )
+                    }
+                }
                 }
             }
         }
@@ -3400,9 +3461,9 @@ fun FileChangeSummaryCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .heightIn(min = 48.dp)
                     .clickable { expanded = !expanded }
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
@@ -3425,6 +3486,32 @@ fun FileChangeSummaryCard(
                     overflow = TextOverflow.Ellipsis,
                 )
 
+                if (state.totalAdditions > 0 || state.totalDeletions > 0) {
+                    Row(
+                        modifier = Modifier
+                            .clip(AgentoShapes.PillShape)
+                            .background(if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (state.totalAdditions > 0) {
+                            Text(
+                                text = "+${state.totalAdditions}",
+                                style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                                color = Ragentolors.Success,
+                            )
+                        }
+                        if (state.totalDeletions > 0) {
+                            Text(
+                                text = "-${state.totalDeletions}",
+                                style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                                color = Ragentolors.Error,
+                            )
+                        }
+                    }
+                }
+
                 AgentoWebIcon(
                     glyph = AgentoWebGlyph.ChevronRight,
                     contentDescription = chevronContentDescription,
@@ -3432,6 +3519,26 @@ fun FileChangeSummaryCard(
                         .size(18.dp)
                         .graphicsLayer { rotationZ = chevronRotation },
                     tint = colors.secondaryContent,
+                )
+            }
+
+            if (!expanded && state.files.isNotEmpty()) {
+                val previewNames = buildString {
+                    append(state.files.take(3).joinToString(" · ") { it.name })
+                    if (state.files.size > 3) append(" +${state.files.size - 3}")
+                }
+                Text(
+                    text = previewNames,
+                    style = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.5.sp,
+                        color = colors.secondaryContent,
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 35.dp, end = 16.dp, bottom = 10.dp),
                 )
             }
 

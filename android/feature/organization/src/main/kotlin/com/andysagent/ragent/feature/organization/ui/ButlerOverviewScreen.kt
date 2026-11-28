@@ -20,18 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.HourglassTop
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -48,9 +35,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.andysagent.ragent.core.designsystem.AgentoButton
+import com.andysagent.ragent.core.designsystem.AgentoFilterPill
 import com.andysagent.ragent.core.designsystem.AgentoIconButton
+import com.andysagent.ragent.core.designsystem.AgentoProgressBar
 import com.andysagent.ragent.core.designsystem.AgentoShapes
 import com.andysagent.ragent.core.designsystem.AgentoTopBar
+import com.andysagent.ragent.core.designsystem.AgentoWebGlyph
+import com.andysagent.ragent.core.designsystem.AgentoWebIcon
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.designsystem.RagentCard
 import com.andysagent.ragent.feature.organization.R
@@ -103,13 +94,13 @@ fun ButlerOverviewScreen(
                     contentDescription = stringResource(R.string.factory_team_08),
                     enabled = !uiState.overviewLoading,
                 ) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = null)
+                    AgentoWebIcon(AgentoWebGlyph.Refresh, contentDescription = null, modifier = Modifier.size(20.dp))
                 }
             },
         )
 
         if (uiState.overviewLoading) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            AgentoProgressBar(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
         }
 
         LazyColumn(
@@ -149,7 +140,7 @@ fun ButlerOverviewScreen(
                             label = stringResource(R.string.butler_bucket_in_progress),
                             count = inProgressCount,
                             accent = colors.running,
-                            icon = Icons.Rounded.HourglassTop,
+                            glyph = AgentoWebGlyph.Clock,
                             selected = uiState.activeFilter == ButlerFilter.IN_PROGRESS,
                             onClick = {
                                 onSelectFilter(
@@ -163,7 +154,7 @@ fun ButlerOverviewScreen(
                             label = stringResource(R.string.butler_bucket_awaiting_decision),
                             count = awaitingDecisionCount,
                             accent = colors.actionPrimary,
-                            icon = Icons.Rounded.Schedule,
+                            glyph = AgentoWebGlyph.Bell,
                             selected = uiState.activeFilter == ButlerFilter.AWAITING_DECISION,
                             onClick = {
                                 onSelectFilter(
@@ -182,7 +173,7 @@ fun ButlerOverviewScreen(
                             label = stringResource(R.string.butler_bucket_delivered_artifacts),
                             count = deliveredCount,
                             accent = colors.success,
-                            icon = Icons.Rounded.CheckCircle,
+                            glyph = AgentoWebGlyph.Check,
                             selected = uiState.activeFilter == ButlerFilter.DELIVERED_ARTIFACTS,
                             onClick = {
                                 onSelectFilter(
@@ -196,7 +187,7 @@ fun ButlerOverviewScreen(
                             label = stringResource(R.string.butler_bucket_blocked_alerts),
                             count = blockedCount,
                             accent = colors.error,
-                            icon = Icons.Rounded.WarningAmber,
+                            glyph = AgentoWebGlyph.Report,
                             selected = uiState.activeFilter == ButlerFilter.BLOCKED_AND_ALERTS,
                             onClick = {
                                 onSelectFilter(
@@ -221,7 +212,7 @@ fun ButlerOverviewScreen(
                         text = stringResource(R.string.butler_voice_title),
                         onClick = { onOpenVoiceButler(null, null) },
                         leadingIcon = {
-                            Icon(Icons.Rounded.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+                            AgentoWebIcon(AgentoWebGlyph.Microphone, contentDescription = null, modifier = Modifier.size(18.dp))
                         },
                         modifier = Modifier.weight(1f).testTag("butler-open-voice-button"),
                     )
@@ -234,7 +225,7 @@ fun ButlerOverviewScreen(
                 }
             }
 
-            // Filter Chips + Legacy Report Link
+            // Filter Pills + Legacy Report Link
             item("filter-chips") {
                 Row(
                     modifier = Modifier
@@ -243,30 +234,30 @@ fun ButlerOverviewScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    FilterChip(
+                    AgentoFilterPill(
                         selected = uiState.activeFilter == ButlerFilter.ALL,
                         onClick = { onSelectFilter(ButlerFilter.ALL) },
-                        label = { Text(stringResource(R.string.butler_bucket_all)) },
+                        label = stringResource(R.string.butler_bucket_all),
                     )
-                    FilterChip(
+                    AgentoFilterPill(
                         selected = uiState.activeFilter == ButlerFilter.IN_PROGRESS,
                         onClick = { onSelectFilter(ButlerFilter.IN_PROGRESS) },
-                        label = { Text("${stringResource(R.string.butler_bucket_in_progress)} ($inProgressCount)") },
+                        label = "${stringResource(R.string.butler_bucket_in_progress)} ($inProgressCount)",
                     )
-                    FilterChip(
+                    AgentoFilterPill(
                         selected = uiState.activeFilter == ButlerFilter.AWAITING_DECISION,
                         onClick = { onSelectFilter(ButlerFilter.AWAITING_DECISION) },
-                        label = { Text("${stringResource(R.string.butler_bucket_awaiting_decision)} ($awaitingDecisionCount)") },
+                        label = "${stringResource(R.string.butler_bucket_awaiting_decision)} ($awaitingDecisionCount)",
                     )
-                    FilterChip(
+                    AgentoFilterPill(
                         selected = uiState.activeFilter == ButlerFilter.DELIVERED_ARTIFACTS,
                         onClick = { onSelectFilter(ButlerFilter.DELIVERED_ARTIFACTS) },
-                        label = { Text("${stringResource(R.string.butler_bucket_delivered_artifacts)} ($deliveredCount)") },
+                        label = "${stringResource(R.string.butler_bucket_delivered_artifacts)} ($deliveredCount)",
                     )
-                    FilterChip(
+                    AgentoFilterPill(
                         selected = uiState.activeFilter == ButlerFilter.BLOCKED_AND_ALERTS,
                         onClick = { onSelectFilter(ButlerFilter.BLOCKED_AND_ALERTS) },
-                        label = { Text("${stringResource(R.string.butler_bucket_blocked_alerts)} ($blockedCount)") },
+                        label = "${stringResource(R.string.butler_bucket_blocked_alerts)} ($blockedCount)",
                     )
                     TextButton(onClick = onOpenOwnerReportNode) { Text(stringResource(R.string.owner_node_title)) }
                     TextButton(onClick = onOpenLegacyReports) {
@@ -412,7 +403,7 @@ private fun ButlerSummaryTile(
     label: String,
     count: Int,
     accent: Color,
-    icon: ImageVector,
+    glyph: AgentoWebGlyph,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -434,7 +425,7 @@ private fun ButlerSummaryTile(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+            AgentoWebIcon(glyph, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
             Text(
                 text = count.toString(),
                 style = MaterialTheme.typography.titleLarge,
@@ -512,7 +503,7 @@ private fun StatusBanner(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+        AgentoWebIcon(AgentoWebGlyph.Bell, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
         Text(text = text, style = MaterialTheme.typography.bodySmall, color = colors.primaryContent)
     }
 }
@@ -666,7 +657,7 @@ private fun ButlerItemCard(
                         onClick = onAskVoice,
                         secondary = true,
                         leadingIcon = {
-                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                            AgentoWebIcon(AgentoWebGlyph.Agent, contentDescription = null, modifier = Modifier.size(16.dp))
                         },
                     )
                 }

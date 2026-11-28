@@ -1,15 +1,18 @@
 package com.andysagent.ragent.feature.organization.ui
 
 import android.net.Uri
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.andysagent.ragent.core.designsystem.AgentoTextField
 import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.network.ApiRequest
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
@@ -73,9 +76,11 @@ fun TeamMessagesScreen(transport: RagentTransport, organizationId: String, nodes
                     TextButton(enabled = pendingEscalation == null || pendingEscalation?.first == id, onClick = { val key=pendingEscalation?.takeIf { it.first == id }?.second ?: UUID.randomUUID().toString(); scope.launch { escalate(selected.id, id, key) } }) { Text("Escalate to manager") }
                 }
             }
-            OutlinedTextField(value = body, onValueChange = { if (it.length <= 4000) body = it }, label = { Text("Information") })
-            OutlinedTextField(value = workItemId, onValueChange = { if (it.length <= 255) workItemId = it }, label = { Text("Work item ID (optional)") })
-            OutlinedTextField(value = deadline, onValueChange = { if (it.length <= 40) deadline = it }, label = { Text("Reply deadline UTC (YYYY-MM-DDTHH:MM:SS.sssZ, optional)") })
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+                AgentoTextField(value = body, onValueChange = { if (it.length <= 4000) body = it }, label = "Information", singleLine = false, showLabelWhenFilled = true)
+                AgentoTextField(value = workItemId, onValueChange = { if (it.length <= 255) workItemId = it }, label = "Work item ID (optional)", showLabelWhenFilled = true)
+                AgentoTextField(value = deadline, onValueChange = { if (it.length <= 40) deadline = it }, label = "Reply deadline UTC (YYYY-MM-DDTHH:MM:SS.sssZ, optional)", showLabelWhenFilled = true)
+            }
             TextButton(onClick = {
                 if (body.isNotBlank()) {
                     val command = buildJsonObject { put("body", body); put("requestType", "information"); put("idempotencyKey", UUID.randomUUID().toString()); if(workItemId.isNotBlank()) put("workItemId",workItemId.trim()) }

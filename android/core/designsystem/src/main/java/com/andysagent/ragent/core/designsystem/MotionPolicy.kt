@@ -77,18 +77,35 @@ fun motionPolicy(): MotionPolicy = LocalMotionPolicy.current
  */
 object AgentoSprings {
     const val DAMPING_SNAPPY = 0.82f
+    const val DAMPING_BOUNCY = 0.72f
     const val DAMPING_SMOOTH = 0.88f
+    const val DAMPING_GENTLE = 0.90f
+    const val DAMPING_MICRO = 0.78f
+    const val DAMPING_INDICATOR = 0.88f
     const val DAMPING_BOUNCELESS = 1.0f
 
     const val STIFFNESS_HIGH = 420f
+    const val STIFFNESS_EXPRESSIVE = 360f
     const val STIFFNESS_MEDIUM = 320f
     const val STIFFNESS_LOW = 180f
 
     fun <T> snappy(): androidx.compose.animation.core.SpringSpec<T> =
         androidx.compose.animation.core.spring(dampingRatio = DAMPING_SNAPPY, stiffness = STIFFNESS_HIGH)
 
+    fun <T> bouncy(): androidx.compose.animation.core.SpringSpec<T> =
+        androidx.compose.animation.core.spring(dampingRatio = DAMPING_BOUNCY, stiffness = STIFFNESS_EXPRESSIVE)
+
     fun <T> smooth(): androidx.compose.animation.core.SpringSpec<T> =
         androidx.compose.animation.core.spring(dampingRatio = DAMPING_SMOOTH, stiffness = STIFFNESS_MEDIUM)
+
+    fun <T> gentle(): androidx.compose.animation.core.SpringSpec<T> =
+        androidx.compose.animation.core.spring(dampingRatio = DAMPING_GENTLE, stiffness = 260f)
+
+    fun <T> micro(): androidx.compose.animation.core.SpringSpec<T> =
+        androidx.compose.animation.core.spring(dampingRatio = DAMPING_MICRO, stiffness = 440f)
+
+    fun <T> indicator(): androidx.compose.animation.core.SpringSpec<T> =
+        androidx.compose.animation.core.spring(dampingRatio = DAMPING_INDICATOR, stiffness = 430f)
 
     fun <T> keyboard(): androidx.compose.animation.core.SpringSpec<T> =
         androidx.compose.animation.core.spring(dampingRatio = DAMPING_BOUNCELESS, stiffness = STIFFNESS_HIGH)

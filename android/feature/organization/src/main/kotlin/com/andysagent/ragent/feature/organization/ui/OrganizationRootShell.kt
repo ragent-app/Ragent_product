@@ -102,8 +102,12 @@ fun OrganizationRootShell(
     val height = (liveOrigin.height + (target.height - liveOrigin.height) * p.pow(1.15f)).coerceAtLeast(1f)
     androidx.compose.runtime.SideEffect { onVisibleSizeChanged(width, height) }
     val center = liveOrigin.center + (target.center - liveOrigin.center) * p - (rootOrigin ?: Offset.Zero)
-    val corner = if (sourceIsCircle) minOf(width, height) / 2f +
-        (with(density) { 22.dp.toPx() } - minOf(width, height) / 2f) * smoothRoot(p, .10f, .80f) else with(density) { 22.dp.toPx() }
+    val corner = when {
+        sourceIsCircle -> minOf(width, height) / 2f +
+            (with(density) { 22.dp.toPx() } - minOf(width, height) / 2f) * smoothRoot(p, .10f, .80f)
+        cardMaterialEnabled -> with(density) { 22.dp.toPx() }
+        else -> 0f
+    }
     val color = (if (surfaceColor == Color.Unspecified) LocalRagentColors.current.canvas else surfaceColor).copy(alpha = 1f)
     val collapsedColor = if (collapsedSurfaceColor == Color.Unspecified) color else collapsedSurfaceColor.copy(alpha = 1f)
     val shape = RoundedCornerShape(with(density) { corner.coerceAtLeast(0f).toDp() })

@@ -4,6 +4,11 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,42 +20,21 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Devices
-import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.MicOff
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -69,9 +54,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.andysagent.ragent.core.designsystem.AgentoAuraPhase
 import com.andysagent.ragent.core.designsystem.AgentoButton
+import com.andysagent.ragent.core.designsystem.AgentoFilterPill
+import com.andysagent.ragent.core.designsystem.AgentoFrostedModalBottomSheet
+import com.andysagent.ragent.core.designsystem.AgentoHaptics
+import com.andysagent.ragent.core.designsystem.AgentoHorizonAura
 import com.andysagent.ragent.core.designsystem.AgentoIconButton
+import com.andysagent.ragent.core.designsystem.AgentoProgressBar
 import com.andysagent.ragent.core.designsystem.AgentoShapes
+import com.andysagent.ragent.core.designsystem.AgentoSwitch
+import com.andysagent.ragent.core.designsystem.AgentoTextField
+import com.andysagent.ragent.core.designsystem.AgentoWebGlyph
+import com.andysagent.ragent.core.designsystem.AgentoWebIcon
+import com.andysagent.ragent.core.designsystem.LocalModalBottomSheetDismiss
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.data.VoiceAdapterDescriptorDto
@@ -82,7 +78,7 @@ import com.andysagent.ragent.feature.organization.data.VoiceTurnDto
 import com.andysagent.ragent.feature.organization.presentation.ButlerUiState
 import com.andysagent.ragent.feature.organization.presentation.ButlerVoicePhase
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ButlerVoiceSheet(
     uiState: ButlerUiState,
@@ -100,13 +96,16 @@ fun ButlerVoiceSheet(
     onOpenApprovalCard: (VoiceApprovalCardDto) -> Unit,
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
     val colors = LocalRagentColors.current
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val listState = rememberLazyListState()
 
+    var controlsDrawerOpen by remember { mutableStateOf(false) }
     var showSessionsPicker by remember { mutableStateOf(false) }
     var showHandoffPanel by remember { mutableStateOf(false) }
     var showEnginesPanel by remember { mutableStateOf(false) }
+    var showDiagnostics by remember { mutableStateOf(false) }
+    var keyboardComposerOpen by remember { mutableStateOf(uiState.draftText.isNotBlank()) }
     var handoffDeviceId by remember { mutableStateOf("desktop-primary") }
     var handoffDeviceType by remember { mutableStateOf("desktop") }
     var handoffDeviceLabel by remember { mutableStateOf("Desktop Workstation") }
@@ -120,6 +119,7 @@ fun ButlerVoiceSheet(
     }
 
     fun triggerVoiceCaptureOrBargeIn() {
+        AgentoHaptics.performTick(view)
         val isSpeaking = uiState.voicePhase == ButlerVoicePhase.SPEAKING
         val isListening = uiState.voicePhase == ButlerVoicePhase.LISTENING
         if (isSpeaking || isListening) {
@@ -143,410 +143,508 @@ fun ButlerVoiceSheet(
         }
     }
 
-    ModalBottomSheet(
+    LaunchedEffect(uiState.draftText) {
+        if (uiState.draftText.isNotBlank()) {
+            keyboardComposerOpen = true
+        }
+    }
+
+    val auraPhase = when (uiState.voicePhase) {
+        ButlerVoicePhase.LISTENING -> AgentoAuraPhase.Listening
+        ButlerVoicePhase.THINKING, ButlerVoicePhase.CREATING_SESSION -> AgentoAuraPhase.Thinking
+        ButlerVoicePhase.SPEAKING -> AgentoAuraPhase.Speaking
+        ButlerVoicePhase.AWAITING_APPROVAL -> AgentoAuraPhase.WaitingApproval
+        ButlerVoicePhase.ASR_ERROR -> AgentoAuraPhase.Error
+        ButlerVoicePhase.IDLE, ButlerVoicePhase.INTERRUPTED -> AgentoAuraPhase.Idle
+    }
+
+    AgentoFrostedModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = colors.canvas,
+        backdropLayer = null,
+        edgeToEdgeBottom = true,
     ) {
-        Column(
+        val dismissSheet = LocalModalBottomSheetDismiss.current ?: onDismiss
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.9f)
-                .padding(horizontal = 16.dp)
+                .fillMaxHeight(0.92f)
                 .testTag("butler-voice-sheet"),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.butler_voice_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.primaryContent,
-                    )
-                    Text(
-                        text = uiState.boundResponsibilityTitle?.takeIf { it.isNotBlank() }
-                            ?: uiState.boundResponsibilityId?.let { "Responsibility $it" }
-                            ?: "All responsibilities",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.secondaryContent,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    AgentoIconButton(
-                        onClick = onRefreshSession,
-                        contentDescription = stringResource(R.string.butler_voice_sync),
-                    ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = null)
-                    }
-                    AgentoIconButton(
-                        onClick = onDismiss,
-                        contentDescription = stringResource(R.string.butler_approval_cancel),
-                    ) {
-                        Icon(Icons.Rounded.Close, contentDescription = null)
-                    }
-                }
-            }
-
-            // Session Continuity & Device Action Strip
-            uiState.voiceSession?.let { session ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(AgentoShapes.SurfaceSmallShape)
-                        .background(colors.quietSurface)
-                        .border(0.75.dp, colors.subtleOutline, AgentoShapes.SurfaceSmallShape)
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Session ${session.id.take(12)} · turn #${session.turnSeq} · gen ${session.playbackGeneration}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = colors.primaryContent,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = session.activeDeviceLabel
-                                ?: session.activeDeviceType
-                                ?: "android",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.actionPrimary,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        FilterChip(
-                            selected = showHandoffPanel,
-                            onClick = { showHandoffPanel = !showHandoffPanel },
-                            leadingIcon = { Icon(Icons.Rounded.Devices, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            label = { Text(stringResource(R.string.butler_voice_handoff)) },
-                        )
-                        FilterChip(
-                            selected = showSessionsPicker,
-                            onClick = { showSessionsPicker = !showSessionsPicker },
-                            leadingIcon = { Icon(Icons.Rounded.Sync, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            label = { Text("${stringResource(R.string.butler_voice_sessions)} (${uiState.availableSessions.size})") },
-                        )
-                        FilterChip(
-                            selected = showEnginesPanel,
-                            onClick = { showEnginesPanel = !showEnginesPanel },
-                            leadingIcon = { Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            label = { Text(stringResource(R.string.butler_voice_engines)) },
-                        )
-                        TextButton(onClick = onStartNewSession) {
-                            Text("New Session")
-                        }
-                    }
-                }
-            }
-
-            if (showHandoffPanel && uiState.voiceSession != null) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(AgentoShapes.SurfaceSmallShape)
-                        .background(colors.surfaceLow)
-                        .border(0.75.dp, colors.subtleOutline, AgentoShapes.SurfaceSmallShape)
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "Cross-Device Continuity Handoff",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.primaryContent,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("desktop", "web", "android").forEach { kind ->
-                            FilterChip(
-                                selected = handoffDeviceType == kind,
-                                onClick = {
-                                    handoffDeviceType = kind
-                                    if (handoffDeviceId.isBlank() || handoffDeviceId.endsWith("-primary")) {
-                                        handoffDeviceId = "$kind-primary"
-                                    }
-                                    handoffDeviceLabel = when (kind) {
-                                        "desktop" -> "Desktop Workstation"
-                                        "web" -> "Web Browser"
-                                        else -> "Android Device"
-                                    }
-                                },
-                                label = { Text(kind) },
-                            )
-                        }
-                    }
-                    OutlinedTextField(
-                        value = handoffDeviceId,
-                        onValueChange = { handoffDeviceId = it },
-                        label = { Text("Target device ID") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = handoffDeviceLabel,
-                        onValueChange = { handoffDeviceLabel = it },
-                        label = { Text("Target device label") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    AgentoButton(
-                        text = "Sync & Handoff Now",
-                        onClick = {
-                            onRequestHandoff(handoffDeviceId, handoffDeviceType, handoffDeviceLabel)
-                            showHandoffPanel = false
-                        },
-                        enabled = handoffDeviceId.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth().testTag("butler-handoff-submit"),
-                    )
-                }
-            }
-
-            if (showSessionsPicker) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(AgentoShapes.SurfaceSmallShape)
-                        .background(colors.surfaceLow)
-                        .border(0.75.dp, colors.subtleOutline, AgentoShapes.SurfaceSmallShape)
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = "Resume Cross-Device Session",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    if (uiState.availableSessions.isEmpty()) {
-                        Text("No other saved voice sessions.", style = MaterialTheme.typography.bodySmall, color = colors.secondaryContent)
-                    } else {
-                        uiState.availableSessions.take(6).forEach { candidate ->
-                            SessionResumeRow(
-                                session = candidate,
-                                isActive = candidate.id == uiState.voiceSession?.id,
-                                onClick = {
-                                    onResumeSession(candidate.id)
-                                    showSessionsPicker = false
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (showEnginesPanel) {
-                AdapterSelectionPanel(
-                    asrAdapters = uiState.adapters?.asr.orEmpty(),
-                    reasonerAdapters = uiState.adapters?.reasoner.orEmpty(),
-                    ttsAdapters = uiState.adapters?.tts.orEmpty(),
-                    selectedAsr = uiState.selectedAsrEngineId,
-                    selectedReasoner = uiState.selectedReasonerEngineId,
-                    selectedTts = uiState.selectedTtsEngineId,
-                    onSelect = onSelectAdapters,
-                )
-            }
-
-            uiState.handoffNotice?.let { notice ->
-                VoiceBannerCard(text = notice, accent = colors.actionPrimary)
-            }
-
-            // Live Phase & Safety Banners
-            VoicePhaseStatusCard(
-                phase = uiState.voicePhase,
-                rmsLevel = uiState.rmsLevel,
-                playbackGeneration = uiState.voiceSession?.playbackGeneration ?: 0L,
-                bargeInCount = uiState.bargeInCount,
-                onBargeIn = { triggerVoiceCaptureOrBargeIn() },
+            AgentoHorizonAura(
+                phase = auraPhase,
+                voiceLevel = uiState.rmsLevel,
+                heightFraction = 0.40f,
+                modifier = Modifier.matchParentSize(),
             )
 
-            val safetyPrompt = uiState.asrErrorBanner ?: uiState.clarificationPrompt
-            if (!safetyPrompt.isNullOrBlank()) {
-                Column(
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Clean Live Header (diagnostic strings tucked into settings drawer)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.butler_voice_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.primaryContent,
+                        )
+                        Text(
+                            text = uiState.boundResponsibilityTitle?.takeIf { it.isNotBlank() }
+                                ?: uiState.boundResponsibilityId?.let { "Responsibility $it" }
+                                ?: "All responsibilities",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.secondaryContent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        AgentoIconButton(
+                            onClick = { controlsDrawerOpen = !controlsDrawerOpen },
+                            contentDescription = stringResource(R.string.butler_voice_engines),
+                        ) {
+                            AgentoWebIcon(
+                                glyph = AgentoWebGlyph.Settings,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = if (controlsDrawerOpen) colors.accentPrimary else colors.primaryContent,
+                            )
+                        }
+                        AgentoIconButton(
+                            onClick = onRefreshSession,
+                            contentDescription = stringResource(R.string.butler_voice_sync),
+                        ) {
+                            AgentoWebIcon(AgentoWebGlyph.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
+                        AgentoIconButton(
+                            onClick = dismissSheet,
+                            contentDescription = stringResource(R.string.butler_approval_cancel),
+                        ) {
+                            AgentoWebIcon(AgentoWebGlyph.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+
+                // Collapsible Settings, Continuity, Handoff & Diagnostics Drawer
+                AnimatedVisibility(
+                    visible = controlsDrawerOpen,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(AgentoShapes.SurfaceMediumShape)
+                            .background(colors.quietSurface.copy(alpha = 0.88f))
+                            .border(0.75.dp, colors.subtleOutline, AgentoShapes.SurfaceMediumShape)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.butler_voice_continuous),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.primaryContent,
+                            )
+                            AgentoSwitch(
+                                checked = uiState.continuousMode,
+                                onCheckedChange = onToggleContinuousMode,
+                            )
+                        }
+
+                        if (uiState.voiceSession != null) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                AgentoFilterPill(
+                                    selected = showHandoffPanel,
+                                    onClick = { showHandoffPanel = !showHandoffPanel },
+                                    leadingIcon = {
+                                        AgentoWebIcon(AgentoWebGlyph.Device, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    },
+                                    label = stringResource(R.string.butler_voice_handoff),
+                                )
+                                AgentoFilterPill(
+                                    selected = showSessionsPicker,
+                                    onClick = { showSessionsPicker = !showSessionsPicker },
+                                    leadingIcon = {
+                                        AgentoWebIcon(AgentoWebGlyph.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    },
+                                    label = "${stringResource(R.string.butler_voice_sessions)} (${uiState.availableSessions.size})",
+                                )
+                                AgentoFilterPill(
+                                    selected = showEnginesPanel,
+                                    onClick = { showEnginesPanel = !showEnginesPanel },
+                                    leadingIcon = {
+                                        AgentoWebIcon(AgentoWebGlyph.Settings, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    },
+                                    label = stringResource(R.string.butler_voice_engines),
+                                )
+                                TextButton(onClick = onStartNewSession) {
+                                    Text("New Session")
+                                }
+                            }
+                        }
+
+                        if (showHandoffPanel && uiState.voiceSession != null) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(AgentoShapes.SurfaceSmallShape)
+                                    .background(colors.surfaceLow)
+                                    .border(0.75.dp, colors.subtleOutline, AgentoShapes.SurfaceSmallShape)
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = "Cross-Device Continuity Handoff",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.primaryContent,
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("desktop", "web", "android").forEach { kind ->
+                                        AgentoFilterPill(
+                                            selected = handoffDeviceType == kind,
+                                            onClick = {
+                                                handoffDeviceType = kind
+                                                if (handoffDeviceId.isBlank() || handoffDeviceId.endsWith("-primary")) {
+                                                    handoffDeviceId = "$kind-primary"
+                                                }
+                                                handoffDeviceLabel = when (kind) {
+                                                    "desktop" -> "Desktop Workstation"
+                                                    "web" -> "Web Browser"
+                                                    else -> "Android Device"
+                                                }
+                                            },
+                                            label = kind,
+                                        )
+                                    }
+                                }
+                                AgentoTextField(
+                                    value = handoffDeviceId,
+                                    onValueChange = { handoffDeviceId = it },
+                                    label = "Target device ID",
+                                    singleLine = true,
+                                    showLabelWhenFilled = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                AgentoTextField(
+                                    value = handoffDeviceLabel,
+                                    onValueChange = { handoffDeviceLabel = it },
+                                    label = "Target device label",
+                                    singleLine = true,
+                                    showLabelWhenFilled = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                AgentoButton(
+                                    text = "Sync & Handoff Now",
+                                    onClick = {
+                                        onRequestHandoff(handoffDeviceId, handoffDeviceType, handoffDeviceLabel)
+                                        showHandoffPanel = false
+                                    },
+                                    enabled = handoffDeviceId.isNotBlank(),
+                                    modifier = Modifier.fillMaxWidth().testTag("butler-handoff-submit"),
+                                )
+                            }
+                        }
+
+                        if (showSessionsPicker) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(AgentoShapes.SurfaceSmallShape)
+                                    .background(colors.surfaceLow)
+                                    .border(0.75.dp, colors.subtleOutline, AgentoShapes.SurfaceSmallShape)
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = "Resume Cross-Device Session",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.primaryContent,
+                                )
+                                if (uiState.availableSessions.isEmpty()) {
+                                    Text(
+                                        "No other saved voice sessions.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colors.secondaryContent,
+                                    )
+                                } else {
+                                    uiState.availableSessions.take(6).forEach { candidate ->
+                                        SessionResumeRow(
+                                            session = candidate,
+                                            isActive = candidate.id == uiState.voiceSession?.id,
+                                            onClick = {
+                                                onResumeSession(candidate.id)
+                                                showSessionsPicker = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (showEnginesPanel) {
+                            AdapterSelectionPanel(
+                                asrAdapters = uiState.adapters?.asr.orEmpty(),
+                                reasonerAdapters = uiState.adapters?.reasoner.orEmpty(),
+                                ttsAdapters = uiState.adapters?.tts.orEmpty(),
+                                selectedAsr = uiState.selectedAsrEngineId,
+                                selectedReasoner = uiState.selectedReasonerEngineId,
+                                selectedTts = uiState.selectedTtsEngineId,
+                                onSelect = onSelectAdapters,
+                            )
+                        }
+
+                        uiState.voiceSession?.let { session ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(AgentoShapes.SurfaceSmallShape)
+                                    .clickable { showDiagnostics = !showDiagnostics }
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "Active device: ${session.activeDeviceLabel ?: session.activeDeviceType ?: "android"}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.secondaryContent,
+                                )
+                                Text(
+                                    text = if (showDiagnostics) "Hide diagnostics" else "Diagnostics",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.accentPrimary,
+                                )
+                            }
+                            if (showDiagnostics) {
+                                Text(
+                                    text = "Session ${session.id.take(12)} · turn #${session.turnSeq} · gen ${session.playbackGeneration}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = colors.secondaryContent,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                uiState.handoffNotice?.let { notice ->
+                    VoiceBannerCard(text = notice, accent = colors.actionPrimary)
+                }
+
+                // Live Phase Status Card
+                VoicePhaseStatusCard(
+                    phase = uiState.voicePhase,
+                    rmsLevel = uiState.rmsLevel,
+                    playbackGeneration = uiState.voiceSession?.playbackGeneration ?: 0L,
+                    bargeInCount = uiState.bargeInCount,
+                    onBargeIn = { triggerVoiceCaptureOrBargeIn() },
+                )
+
+                val safetyPrompt = uiState.asrErrorBanner ?: uiState.clarificationPrompt
+                if (!safetyPrompt.isNullOrBlank()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(AgentoShapes.SurfaceSmallShape)
+                            .background(colors.error.copy(alpha = 0.12f))
+                            .border(0.75.dp, colors.error.copy(alpha = 0.35f), AgentoShapes.SurfaceSmallShape)
+                            .padding(12.dp)
+                            .testTag("butler-asr-retry-banner"),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            AgentoWebIcon(AgentoWebGlyph.Bell, contentDescription = null, tint = colors.error, modifier = Modifier.size(18.dp))
+                            Text(
+                                text = safetyPrompt,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.primaryContent,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                        Text(
+                            text = stringResource(R.string.butler_voice_no_write_on_asr_error),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.secondaryContent,
+                        )
+                        AgentoButton(
+                            text = stringResource(R.string.butler_voice_retry),
+                            onClick = { triggerVoiceCaptureOrBargeIn() },
+                            secondary = true,
+                        )
+                    }
+                }
+
+                uiState.voiceError?.takeIf { it.isNotBlank() }?.let { err ->
+                    VoiceBannerCard(text = err, accent = colors.error)
+                }
+
+                // Turns + Handoffs Live Stream
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(AgentoShapes.SurfaceSmallShape)
-                        .background(colors.error.copy(alpha = 0.12f))
-                        .border(0.75.dp, colors.error.copy(alpha = 0.35f), AgentoShapes.SurfaceSmallShape)
-                        .padding(12.dp)
-                        .testTag("butler-asr-retry-banner"),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (uiState.turns.isEmpty() && uiState.handoffs.isEmpty()) {
+                        item("voice-empty") {
+                            Text(
+                                text = "Ask about responsibility progress, blockers, recent deliverables, or request an approval draft.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.secondaryContent,
+                                modifier = Modifier.padding(vertical = 18.dp),
+                            )
+                        }
+                    }
+                    items(uiState.turns, key = { it.id.ifBlank { "seq:${it.turnSeq}" } }) { turn ->
+                        VoiceTurnCard(
+                            turn = turn,
+                            onOpenApproval = { card -> onOpenApprovalCard(card) },
+                        )
+                    }
+                    if (uiState.handoffs.isNotEmpty()) {
+                        item("handoff-history-header") {
+                            HorizontalDivider(color = colors.subtleOutline)
+                        }
+                        items(uiState.handoffs, key = { "handoff:${it.id}" }) { handoff ->
+                            HandoffEventPill(handoff)
+                        }
+                    }
+                }
+
+                // Expandable Text Follow-Up Input (voice-first by default)
+                AnimatedVisibility(
+                    visible = keyboardComposerOpen,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
                 ) {
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = colors.error, modifier = Modifier.size(18.dp))
-                        Text(
-                            text = safetyPrompt,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.primaryContent,
-                            fontWeight = FontWeight.Medium,
+                        AgentoTextField(
+                            value = uiState.draftText,
+                            onValueChange = onDraftTextChange,
+                            label = "Or type a follow-up in this voice session…",
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
                         )
-                    }
-                    Text(
-                        text = stringResource(R.string.butler_voice_no_write_on_asr_error),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.secondaryContent,
-                    )
-                    AgentoButton(
-                        text = stringResource(R.string.butler_voice_retry),
-                        onClick = { triggerVoiceCaptureOrBargeIn() },
-                        secondary = true,
-                    )
-                }
-            }
-
-            uiState.voiceError?.takeIf { it.isNotBlank() }?.let { err ->
-                VoiceBannerCard(text = err, accent = colors.error)
-            }
-
-            // Turns + Handoffs Timeline
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (uiState.turns.isEmpty() && uiState.handoffs.isEmpty()) {
-                    item("voice-empty") {
-                        Text(
-                            text = "Ask about responsibility progress, blockers, recent deliverables, or request an approval draft.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.secondaryContent,
-                            modifier = Modifier.padding(vertical = 12.dp),
-                        )
-                    }
-                }
-                items(uiState.turns, key = { it.id.ifBlank { "seq:${it.turnSeq}" } }) { turn ->
-                    VoiceTurnCard(
-                        turn = turn,
-                        onOpenApproval = { card -> onOpenApprovalCard(card) },
-                    )
-                }
-                if (uiState.handoffs.isNotEmpty()) {
-                    item("handoff-history-header") {
-                        HorizontalDivider(color = colors.subtleOutline)
-                    }
-                    items(uiState.handoffs, key = { "handoff:${it.id}" }) { handoff ->
-                        HandoffEventPill(handoff)
-                    }
-                }
-            }
-
-            HorizontalDivider(color = colors.subtleOutline)
-
-            // Continuous mode toggle & primary controls
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.butler_voice_continuous),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.primaryContent,
-                )
-                Switch(
-                    checked = uiState.continuousMode,
-                    onCheckedChange = onToggleContinuousMode,
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val isSpeaking = uiState.voicePhase == ButlerVoicePhase.SPEAKING
-                val isListening = uiState.voicePhase == ButlerVoicePhase.LISTENING
-                val micLabel = when {
-                    isSpeaking -> stringResource(R.string.butler_voice_barge_in)
-                    isListening -> stringResource(R.string.butler_voice_listening)
-                    uiState.voicePhase == ButlerVoicePhase.ASR_ERROR -> stringResource(R.string.butler_voice_retry)
-                    else -> stringResource(R.string.butler_voice_speak)
-                }
-                AgentoButton(
-                    text = micLabel,
-                    onClick = { triggerVoiceCaptureOrBargeIn() },
-                    enabled = uiState.voicePhase != ButlerVoicePhase.THINKING &&
-                        uiState.voicePhase != ButlerVoicePhase.CREATING_SESSION &&
-                        uiState.pendingApprovalCard == null,
-                    destructive = isListening,
-                    leadingIcon = {
-                        Icon(
-                            imageVector = when {
-                                isSpeaking -> Icons.Rounded.GraphicEq
-                                isListening -> Icons.Rounded.MicOff
-                                else -> Icons.Rounded.Mic
+                        AgentoIconButton(
+                            onClick = {
+                                val trimmed = uiState.draftText.trim()
+                                if (trimmed.isNotEmpty()) {
+                                    AgentoHaptics.performConfirm(view)
+                                    onSubmitTextTurn(trimmed)
+                                }
                             },
+                            enabled = uiState.draftText.isNotBlank() && uiState.pendingApprovalCard == null,
+                            contentDescription = "Send",
+                        ) {
+                            AgentoWebIcon(AgentoWebGlyph.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+
+                // Bottom Immersive Live Controls
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AgentoIconButton(
+                        onClick = { keyboardComposerOpen = !keyboardComposerOpen },
+                        contentDescription = "Toggle text input",
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (keyboardComposerOpen) colors.accentPrimary.copy(alpha = 0.16f)
+                                else colors.surfaceLow.copy(alpha = 0.84f),
+                            )
+                            .border(0.75.dp, colors.subtleOutline, CircleShape),
+                    ) {
+                        AgentoWebIcon(
+                            glyph = AgentoWebGlyph.Edit,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
+                            tint = if (keyboardComposerOpen) colors.accentPrimary else colors.primaryContent,
                         )
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("butler-voice-mic-button"),
-                )
-                if (isSpeaking) {
-                    AgentoButton(
-                        text = stringResource(R.string.butler_voice_stop_tts),
-                        onClick = onInterruptSpeaking,
-                        secondary = true,
-                        leadingIcon = {
-                            Icon(Icons.Rounded.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        modifier = Modifier.testTag("butler-voice-stop-tts-button"),
-                    )
-                }
-            }
+                    }
 
-            // Text fallback inside same continuous voiceSessionId
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = uiState.draftText,
-                    onValueChange = onDraftTextChange,
-                    placeholder = { Text("Or type a follow-up in this voice session…") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-                AgentoIconButton(
-                    onClick = {
-                        val trimmed = uiState.draftText.trim()
-                        if (trimmed.isNotEmpty()) {
-                            onSubmitTextTurn(trimmed)
-                        }
-                    },
-                    enabled = uiState.draftText.isNotBlank() && uiState.pendingApprovalCard == null,
-                    contentDescription = "Send",
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null)
+                    val isSpeaking = uiState.voicePhase == ButlerVoicePhase.SPEAKING
+                    val isListening = uiState.voicePhase == ButlerVoicePhase.LISTENING
+                    val micLabel = when {
+                        isSpeaking -> stringResource(R.string.butler_voice_barge_in)
+                        isListening -> stringResource(R.string.butler_voice_listening)
+                        uiState.voicePhase == ButlerVoicePhase.ASR_ERROR -> stringResource(R.string.butler_voice_retry)
+                        else -> stringResource(R.string.butler_voice_speak)
+                    }
+                    AgentoButton(
+                        text = micLabel,
+                        onClick = { triggerVoiceCaptureOrBargeIn() },
+                        enabled = uiState.voicePhase != ButlerVoicePhase.THINKING &&
+                            uiState.voicePhase != ButlerVoicePhase.CREATING_SESSION &&
+                            uiState.pendingApprovalCard == null,
+                        destructive = isListening,
+                        leadingIcon = {
+                            AgentoWebIcon(
+                                glyph = when {
+                                    isSpeaking -> AgentoWebGlyph.Bolt
+                                    else -> AgentoWebGlyph.Microphone
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("butler-voice-mic-button"),
+                    )
+
+                    if (isSpeaking) {
+                        AgentoButton(
+                            text = stringResource(R.string.butler_voice_stop_tts),
+                            onClick = {
+                                AgentoHaptics.performTick(view)
+                                onInterruptSpeaking()
+                            },
+                            secondary = true,
+                            leadingIcon = {
+                                AgentoWebIcon(AgentoWebGlyph.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            modifier = Modifier.testTag("butler-voice-stop-tts-button"),
+                        )
+                    }
                 }
             }
         }
@@ -576,12 +674,12 @@ private fun VoicePhaseStatusCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(AgentoShapes.SurfaceSmallShape)
-            .background(accent.copy(alpha = 0.10f))
-            .border(0.75.dp, accent.copy(alpha = 0.30f), AgentoShapes.SurfaceSmallShape)
+            .clip(AgentoShapes.SurfaceMediumShape)
+            .background(accent.copy(alpha = 0.12f))
+            .border(0.75.dp, accent.copy(alpha = 0.30f), AgentoShapes.SurfaceMediumShape)
             .then(if (phase == ButlerVoicePhase.SPEAKING) Modifier.clickable(onClick = onBargeIn) else Modifier)
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -603,12 +701,12 @@ private fun VoicePhaseStatusCard(
             }
         }
         if (phase == ButlerVoicePhase.LISTENING) {
-            LinearProgressIndicator(
-                progress = { rmsLevel.coerceIn(0.08f, 1f) },
-                modifier = Modifier.fillMaxWidth().height(4.dp),
+            AgentoProgressBar(
+                progress = rmsLevel.coerceIn(0.08f, 1f),
+                accentColor = accent,
             )
         } else if (phase == ButlerVoicePhase.THINKING || phase == ButlerVoicePhase.CREATING_SESSION) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(3.dp))
+            AgentoProgressBar(accentColor = accent)
         }
     }
 }
@@ -622,10 +720,10 @@ private fun VoiceTurnCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(AgentoShapes.SurfaceMediumShape)
-            .background(colors.surfaceLow)
-            .border(0.75.dp, colors.subtleOutline, AgentoShapes.SurfaceMediumShape)
-            .padding(12.dp),
+            .clip(AgentoShapes.SurfaceLargeShape)
+            .background(colors.surfaceLow.copy(alpha = 0.88f))
+            .border(0.75.dp, colors.subtleOutline, AgentoShapes.SurfaceLargeShape)
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(
@@ -767,36 +865,36 @@ private fun AdapterSelectionPanel(
     ) {
         if (asrAdapters.isNotEmpty()) {
             Text("ASR Engine", style = MaterialTheme.typography.labelSmall, color = colors.secondaryContent)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 asrAdapters.forEach { adapter ->
-                    FilterChip(
+                    AgentoFilterPill(
                         selected = selectedAsr == adapter.id,
                         onClick = { onSelect(adapter.id, null, null) },
-                        label = { Text(adapter.displayLabel) },
+                        label = adapter.displayLabel,
                     )
                 }
             }
         }
         if (reasonerAdapters.isNotEmpty()) {
             Text("Reasoner", style = MaterialTheme.typography.labelSmall, color = colors.secondaryContent)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 reasonerAdapters.forEach { adapter ->
-                    FilterChip(
+                    AgentoFilterPill(
                         selected = selectedReasoner == adapter.id,
                         onClick = { onSelect(null, adapter.id, null) },
-                        label = { Text(adapter.displayLabel) },
+                        label = adapter.displayLabel,
                     )
                 }
             }
         }
         if (ttsAdapters.isNotEmpty()) {
             Text("TTS Engine", style = MaterialTheme.typography.labelSmall, color = colors.secondaryContent)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ttsAdapters.forEach { adapter ->
-                    FilterChip(
+                    AgentoFilterPill(
                         selected = selectedTts == adapter.id,
                         onClick = { onSelect(null, null, adapter.id) },
-                        label = { Text(adapter.displayLabel) },
+                        label = adapter.displayLabel,
                     )
                 }
             }

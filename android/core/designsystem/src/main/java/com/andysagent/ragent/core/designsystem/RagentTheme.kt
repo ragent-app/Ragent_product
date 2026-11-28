@@ -1860,6 +1860,11 @@ object AgentoMotion {
     val SpatialOffset = spring<androidx.compose.ui.unit.IntOffset>(dampingRatio = 0.82f, stiffness = 300f)
     // 4. Gesture (手势连续) - 1:1 跟手
 
+    // Expressive springs (gentle overshoot for cards, sheets, and segmented indicators)
+    val ExpressiveSpatial = spring<Float>(dampingRatio = 0.78f, stiffness = 340f)
+    val ExpressiveSnappy = spring<Float>(dampingRatio = 0.86f, stiffness = 520f)
+    val ExpressiveSnappyDp = spring<Dp>(dampingRatio = 0.86f, stiffness = 520f)
+
     // Apple 规范交互弹簧 (Fluid, responsive, natural, interruptible)
     val AppleSpring = spring<Float>(
         dampingRatio = 0.96f,

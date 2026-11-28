@@ -16,13 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.*
@@ -34,6 +30,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.andysagent.ragent.core.designsystem.AgentoShapes
+import com.andysagent.ragent.core.designsystem.AgentoTextField
+import com.andysagent.ragent.core.designsystem.AgentoWebGlyph
+import com.andysagent.ragent.core.designsystem.AgentoWebIcon
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.network.ApiException
 import com.andysagent.ragent.core.network.RagentTransport
@@ -478,8 +477,8 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                             scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/trigger-bindings/${Uri.encode(binding["id"]!!.jsonPrimitive.content)}/$action",body); reviewedBindingAction = null }
                         }) { Text("Confirm $action schedule") }
                     }
-                    OutlinedTextField(triggerTime,{triggerTime=it;reviewTrigger=false},label={Text("Scheduled time (ISO with timezone)")})
-                    OutlinedTextField(triggerInterval,{triggerInterval=it;reviewTrigger=false},label={Text("Repeat minutes (blank for once)")})
+                    AgentoTextField(triggerTime,{triggerTime=it;reviewTrigger=false},label="Scheduled time (ISO with timezone)", showLabelWhenFilled = true)
+                    AgentoTextField(triggerInterval,{triggerInterval=it;reviewTrigger=false},label="Repeat minutes (blank for once)", showLabelWhenFilled = true)
                     val interval=triggerInterval.toLongOrNull()
                     if(!reviewTrigger) TextButton(enabled=triggerTime.isNotBlank() && (triggerInterval.isBlank() || interval?.let { it in 1L..525600L } == true),onClick={reviewTrigger=true}) { Text("Review schedule") }
                     else { Text("Schedule $triggerTime${if(interval!=null) " every $interval minutes" else " once"}; a wake is not proof of execution.")
@@ -538,7 +537,7 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                             TextButton(onClick={memoryChanges=if(memoryChanges.containsKey(id)) memoryChanges-id else memoryChanges+(id to ("keep" to ""));memoryPreview=null}) {Text(if(memoryChanges.containsKey(id)) "取消选择" else "选择事实")}
                             memoryChanges[id]?.let { (action,value) ->
                                 listOf("keep","correct","retract").forEach { next -> TextButton(onClick={memoryChanges=memoryChanges+(id to (next to value));memoryPreview=null}) {Text("${if(action==next) "✓ " else ""}$next")} }
-                                if(action=="correct") OutlinedTextField(value,{memoryChanges=memoryChanges+(id to (action to it));memoryPreview=null},label={Text("更正后的值")})
+                                if(action=="correct") AgentoTextField(value,{memoryChanges=memoryChanges+(id to (action to it));memoryPreview=null},label="更正后的值", showLabelWhenFilled = true)
                             }
                         }
                     }
@@ -567,8 +566,8 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                 val codeDescriptor = planCatalogDescriptors?.mapNotNull { it as? JsonObject }?.firstOrNull { it["capability"]?.jsonPrimitive?.contentOrNull == "project-code" && it["available"]?.jsonPrimitive?.booleanOrNull == true }
                 if (planner?.get("digest") != null && plannerTemplate?.get("digest") != null && reportDescriptor?.get("templateDigest") != null) {
                     Text("Configure project read, network and budget below; select report and/or code. Plan review is required by default.")
-                    OutlinedTextField(plannerNode, { plannerNode = it; plannerReview = false; plannerNetworkConfirmed = false }, label = { Text("Planner node ID") })
-                    OutlinedTextField(plannerGeneration, { plannerGeneration = it; plannerReview = false; plannerNetworkConfirmed = false }, label = { Text("Planner node generation") })
+                    AgentoTextField(plannerNode, { plannerNode = it; plannerReview = false; plannerNetworkConfirmed = false }, label = "Planner node ID", showLabelWhenFilled = true)
+                    AgentoTextField(plannerGeneration, { plannerGeneration = it; plannerReview = false; plannerNetworkConfirmed = false }, label = "Planner node generation", showLabelWhenFilled = true)
                     TextButton(onClick = { includeReport = !includeReport; plannerReview = false; autoReportPlans = false }) { Text(if (includeReport) "Remove report capability" else "Add report capability") }
                     val resource = if (reportNetworkPolicy.isNotBlank()) buildJsonObject { put("projectId", current["projectId"]!!); put("readScope", "entire_project"); put("networkPolicy", reportNetworkPolicy) } else null
                     val attemptsValue = reportAttempts.toIntOrNull(); val costValue = reportCost.toDoubleOrNull(); val dailyValue = reportDailyCost.toDoubleOrNull(); val reportGenerationValue = reportGeneration.toLongOrNull()
@@ -620,15 +619,15 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                 val ciProvider = capabilities?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "github-ci" && it["available"]?.jsonPrimitive?.booleanOrNull == true }
                 if (ciProvider != null) {
                     Text("GitHub CI policy: include repository, targetBranch, allowedPaths, candidateScope, registered checkActionId, implementation/review/integration node IDs and binding generations, maxAttempts, maxCost, dailyBudget and validUntil. The check is a registered action, not a shell command. Catalog: $ciProvider")
-                    OutlinedTextField(ciRepository, { ciRepository = it; ciPolicyReviewed = false }, label = { Text("Repository owner/name") })
-                    OutlinedTextField(ciBranch, { ciBranch = it; ciPolicyReviewed = false }, label = { Text("Target branch") })
-                    OutlinedTextField(ciPaths, { ciPaths = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Allowed project paths, comma separated") })
-                    OutlinedTextField(ciCandidate, { ciCandidate = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Candidate path within allowed paths") })
-                    OutlinedTextField(ciCheck, { ciCheck = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Existing registered check ID") })
-                    OutlinedTextField(ciImplementation, { ciImplementation = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Implementation node ID") })
-                    OutlinedTextField(ciReviewNode, { ciReviewNode = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Review node ID") })
-                    OutlinedTextField(ciIntegration, { ciIntegration = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Integration node ID") })
-                    OutlinedTextField(ciGeneration, { ciGeneration = it; ciPolicyReviewed = false; plannerReview = false }, label = { Text("Node generations: implementation, review, integration") })
+                    AgentoTextField(ciRepository, { ciRepository = it; ciPolicyReviewed = false }, label = "Repository owner/name", showLabelWhenFilled = true)
+                    AgentoTextField(ciBranch, { ciBranch = it; ciPolicyReviewed = false }, label = "Target branch", showLabelWhenFilled = true)
+                    AgentoTextField(ciPaths, { ciPaths = it; ciPolicyReviewed = false; plannerReview = false }, label = "Allowed project paths, comma separated", showLabelWhenFilled = true)
+                    AgentoTextField(ciCandidate, { ciCandidate = it; ciPolicyReviewed = false; plannerReview = false }, label = "Candidate path within allowed paths", showLabelWhenFilled = true)
+                    AgentoTextField(ciCheck, { ciCheck = it; ciPolicyReviewed = false; plannerReview = false }, label = "Existing registered check ID", showLabelWhenFilled = true)
+                    AgentoTextField(ciImplementation, { ciImplementation = it; ciPolicyReviewed = false; plannerReview = false }, label = "Implementation node ID", showLabelWhenFilled = true)
+                    AgentoTextField(ciReviewNode, { ciReviewNode = it; ciPolicyReviewed = false; plannerReview = false }, label = "Review node ID", showLabelWhenFilled = true)
+                    AgentoTextField(ciIntegration, { ciIntegration = it; ciPolicyReviewed = false; plannerReview = false }, label = "Integration node ID", showLabelWhenFilled = true)
+                    AgentoTextField(ciGeneration, { ciGeneration = it; ciPolicyReviewed = false; plannerReview = false }, label = "Node generations: implementation, review, integration", showLabelWhenFilled = true)
                     Text("Use the report authorization budget fields below for attempts, cost, daily limit, timezone and expiry, then prepare the CI policy for review.")
                     val ciTemplate = (ciProvider["templates"] as? JsonArray)?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "ragent-reviewed-change" && it["version"]?.jsonPrimitive?.intOrNull == 3 }
                     TextButton(onClick = {
@@ -644,7 +643,7 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                             ciPolicyText = policy.toString(); ciPolicyReviewed = false
                         } else status = "Complete CI fields and budget with valid node generations."
                     }) { Text("Prepare GitHub CI policy") }
-                    OutlinedTextField(ciPolicyText, { ciPolicyText = it; ciPolicyReviewed = false }, label = { Text("Advanced GitHub CI policy JSON") })
+                    AgentoTextField(ciPolicyText, { ciPolicyText = it; ciPolicyReviewed = false }, label = "Advanced GitHub CI policy JSON", singleLine = false, showLabelWhenFilled = true)
                     val parsedCiPolicy = runCatching { Json.parseToJsonElement(ciPolicyText) as? JsonObject }.getOrNull()
                     if (!ciPolicyReviewed) TextButton(enabled = parsedCiPolicy != null, onClick = { ciPolicyReviewed = true }) { Text("Review GitHub CI authorization") }
                     else {
@@ -667,13 +666,13 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                         reportNode = node.id; reportGeneration = node.currentBinding!!.generation.toString()
                         reportReview = false; reportNetworkConfirmed = false; plannerReview = false
                     }) { Text((if (reportNode == node.id && reportGeneration == node.currentBinding?.generation?.toString()) "✓ " else "") + node.displayName.ifBlank { node.id }) } }
-                    OutlinedTextField(reportAttempts, { reportAttempts = it; reportReview = false; plannerReview = false }, label = { Text("Maximum attempts (1–10)") })
-                    OutlinedTextField(reportCost, { reportCost = it; reportReview = false; plannerReview = false }, label = { Text("Maximum cost") })
-                    OutlinedTextField(reportDailyCost, { reportDailyCost = it; reportReview = false; plannerReview = false }, label = { Text("Maximum daily cost") })
-                    OutlinedTextField(reportDailyRuns, { reportDailyRuns = it; reportReview = false }, label = { Text(stringResource(R.string.owner_node_daily_runs)) })
-                    OutlinedTextField(reportDailyTokens, { reportDailyTokens = it; reportReview = false }, label = { Text(stringResource(R.string.owner_node_daily_tokens)) })
+                    AgentoTextField(reportAttempts, { reportAttempts = it; reportReview = false; plannerReview = false }, label = "Maximum attempts (1–10)", showLabelWhenFilled = true)
+                    AgentoTextField(reportCost, { reportCost = it; reportReview = false; plannerReview = false }, label = "Maximum cost", showLabelWhenFilled = true)
+                    AgentoTextField(reportDailyCost, { reportDailyCost = it; reportReview = false; plannerReview = false }, label = "Maximum daily cost", showLabelWhenFilled = true)
+                    AgentoTextField(reportDailyRuns, { reportDailyRuns = it; reportReview = false }, label = stringResource(R.string.owner_node_daily_runs), showLabelWhenFilled = true)
+                    AgentoTextField(reportDailyTokens, { reportDailyTokens = it; reportReview = false }, label = stringResource(R.string.owner_node_daily_tokens), showLabelWhenFilled = true)
                     TextButton(onClick = { reportTimeZone = weeklyZone; reportReview = false; plannerReview = false }) { Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_use_budget_zone, weeklyZone, reportTimeZone.ifBlank { "—" })) }
-                    OutlinedTextField(reportExpiry, { reportExpiry = it; reportReview = false; plannerReview = false }, label = { Text("Authorization expiry (ISO time)") })
+                    AgentoTextField(reportExpiry, { reportExpiry = it; reportReview = false; plannerReview = false }, label = "Authorization expiry (ISO time)", showLabelWhenFilled = true)
                     Text("Network policy: ${reportNetworkPolicy.ifBlank { "not selected" }}")
                     TextButton(onClick = { reportNetworkPolicy = "deny"; reportNetworkConfirmed = false; reportReview = false; plannerReview = false; plannerNetworkConfirmed = false }) { Text("Deny network (requires verified isolation)") }
                     TextButton(onClick = { reportNetworkPolicy = "inherit_existing_permissions"; reportNetworkConfirmed = false; reportReview = false; plannerReview = false; plannerNetworkConfirmed = false }) { Text("Review existing network and tool permissions") }
@@ -811,11 +810,11 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                         Text((if (projectId == availableProjectId) "✓ " else "") + availableProjectId)
                     }
                 }
-                OutlinedTextField(value = objective, onValueChange = { objective = it; reviewForm = false }, label = { Text("Objective") })
+                AgentoTextField(value = objective, onValueChange = { objective = it; reviewForm = false }, label = "Objective", singleLine = false, showLabelWhenFilled = true)
                 if (form == "create") {
-                    OutlinedTextField(value = criterion, onValueChange = { criterion = it; reviewForm = false }, label = { Text("Success criterion") })
-                    OutlinedTextField(value = intervalMinutes, onValueChange = { intervalMinutes = it; reviewForm = false }, label = { Text("Interval minutes (blank for manual)") })
-                    OutlinedTextField(value = expiry, onValueChange = { expiry = it; reviewForm = false }, label = { Text("Policy expiry (ISO time with timezone)") })
+                    AgentoTextField(value = criterion, onValueChange = { criterion = it; reviewForm = false }, label = "Success criterion", singleLine = false, showLabelWhenFilled = true)
+                    AgentoTextField(value = intervalMinutes, onValueChange = { intervalMinutes = it; reviewForm = false }, label = "Interval minutes (blank for manual)", showLabelWhenFilled = true)
+                    AgentoTextField(value = expiry, onValueChange = { expiry = it; reviewForm = false }, label = "Policy expiry (ISO time with timezone)", showLabelWhenFilled = true)
                 }
                 if (!reviewForm) TextButton(enabled = form != "create" || (availableProjectId.isNotBlank() && projectId == availableProjectId), onClick = { reviewForm = true }) { Text("Review") }
                 else {
@@ -851,8 +850,8 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
             Text(if (observation?.get("state")?.jsonPrimitive?.contentOrNull == "found") "发现执行记录，等待系统核实关联。执行记录：${observation["expectedRunId"] ?: "未知"}；状态：${observation["runState"] ?: "未知"}。" else "暂未核实是否已执行。")
             val reservation = itemBudget?.get("reservation") as? JsonObject
             Text(if (reservation == null) "Budget facts unavailable; this does not prove work did not run." else "Budget ${reservation["state"] ?: "unavailable"}; reserved ${reservation["reserved"]?.takeUnless { it is JsonNull } ?: "unknown"}; actual usage ${if (itemBudget?.get("usageState")?.jsonPrimitive?.contentOrNull == "actual") reservation["actualUsage"]?.takeUnless { it is JsonNull } ?: "unknown" else "unknown"}; window ${reservation["window"]?.takeUnless { it is JsonNull } ?: "unknown"}. Admission estimates do not enforce a provider spending cap.")
-            OutlinedTextField(scopedObjective,{scopedObjective=it;scopedPreview=null},label={Text("新的此项工作目标")})
-            OutlinedTextField(scopedCriterion,{scopedCriterion=it;scopedPreview=null},label={Text("可选追加人工验收标准 ID；固定责任合同不支持")})
+            AgentoTextField(scopedObjective,{scopedObjective=it;scopedPreview=null},label="新的此项工作目标", singleLine = false, showLabelWhenFilled = true)
+            AgentoTextField(scopedCriterion,{scopedCriterion=it;scopedPreview=null},label="可选追加人工验收标准 ID；固定责任合同不支持", showLabelWhenFilled = true)
             TextButton(enabled=scopedObjective.isNotBlank(),onClick={ scope.launch {
                 runCatching {
                     val goalId=selected["goalId"]!!.jsonPrimitive.content; var cursor=""; var goal:JsonObject?=null
@@ -875,8 +874,8 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                 val id = row["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
                 if (id.isNotBlank()) {
                     TextButton(onClick = { multiObjectives = if (multiObjectives.containsKey(id)) multiObjectives - id else multiObjectives + (id to ""); multiPreview = null }) { Text("${if (multiObjectives.containsKey(id)) "取消选择" else "选择"} $id · ${row["state"]}") }
-                    if (multiObjectives.containsKey(id)) OutlinedTextField(multiObjectives[id].orEmpty(), { multiObjectives = multiObjectives + (id to it); multiPreview = null }, label = { Text("此工作的新目标") })
-                    if (multiObjectives.containsKey(id)) OutlinedTextField(multiCriteria[id].orEmpty(), { multiCriteria = multiCriteria + (id to it); multiPreview = null }, label = { Text("可选人工标准 ID；固定责任合同不支持") })
+                    if (multiObjectives.containsKey(id)) AgentoTextField(multiObjectives[id].orEmpty(), { multiObjectives = multiObjectives + (id to it); multiPreview = null }, label = "此工作的新目标", singleLine = false, showLabelWhenFilled = true)
+                    if (multiObjectives.containsKey(id)) AgentoTextField(multiCriteria[id].orEmpty(), { multiCriteria = multiCriteria + (id to it); multiPreview = null }, label = "可选人工标准 ID；固定责任合同不支持", showLabelWhenFilled = true)
                 }
             }
             TextButton(enabled = multiObjectives.size in 2..32 && multiObjectives.values.all { it.isNotBlank() }, onClick = { scope.launch {
@@ -1047,7 +1046,7 @@ private fun FactoryInlineBanner(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+        AgentoWebIcon(AgentoWebGlyph.Bell, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
         Text(text = text, style = MaterialTheme.typography.bodySmall, color = colors.primaryContent)
     }
 }

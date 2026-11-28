@@ -37,8 +37,12 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.selection.selectable
@@ -208,8 +212,15 @@ import com.andysagent.ragent.core.agentui.ToolCallUiState
 import com.andysagent.ragent.core.agentui.UserMessage
 import com.andysagent.ragent.core.agentui.UserMessageAttachment
 import com.andysagent.ragent.core.agentui.R as AgentUiR
+import com.andysagent.ragent.core.designsystem.AgentoArtifactSurface
+import com.andysagent.ragent.core.designsystem.AgentoAuraPhase
 import com.andysagent.ragent.core.designsystem.AgentoButton
+import com.andysagent.ragent.core.designsystem.AgentoHorizonAura
 import com.andysagent.ragent.core.designsystem.AgentoMotion
+import com.andysagent.ragent.core.designsystem.HorizonEdgeAuraSpec
+import com.andysagent.ragent.core.designsystem.LocalHorizonEdgeAuraController
+import com.andysagent.ragent.core.designsystem.LocalSystemBottomInsetPx
+import com.andysagent.ragent.core.designsystem.AgentoProgressBar
 import com.andysagent.ragent.core.designsystem.RagentCard
 import com.andysagent.ragent.core.designsystem.AgentoEmptyState
 import com.andysagent.ragent.core.designsystem.AgentoIconButton
@@ -1062,6 +1073,13 @@ internal fun shouldShowChatConnectionBanner(
     activeRemoteTargetId: String?,
 ): Boolean = connection != AgentConnectionStatus.Connected && activeRemoteTargetId != null
 
+internal fun shouldShowChatStaleHistoryBar(
+    hasTurns: Boolean,
+    visibleHistoryStale: Boolean,
+    showConnectionBanner: Boolean,
+    connection: AgentConnectionStatus,
+): Boolean = hasTurns && visibleHistoryStale && !showConnectionBanner && connection == AgentConnectionStatus.Connected
+
 internal fun shouldShowChatConnectionPill(
     connection: AgentConnectionStatus,
     activeRemoteTargetId: String?,
@@ -1332,7 +1350,13 @@ private fun PrimaryNavigationSurface(
                         presentation = projectPresentation,
                         motion = projectMotion,
                     )
-                    AgentoDestination.Home -> HomeSurface(state, onEvent, windowSizeClass, contentModifier)
+                    AgentoDestination.Home -> HomeSurface(
+                        state = state,
+                        onEvent = onEvent,
+                        windowSizeClass = windowSizeClass,
+                        modifier = contentModifier,
+                        isActivePage = active && !state.chatOpen && !state.agentOpen && state.settingsPage == SettingsPage.Overview,
+                    )
                     AgentoDestination.Settings -> SettingsSurface(
                         accountsViewModel = accountsViewModel,
                         brokerEnrollmentController = brokerEnrollmentController,
@@ -2849,6 +2873,7 @@ private fun ChatSurface(
     // it locally, so their own surfaces defocus the transcript while the
     // activity behind them is merely dimmed by the modal scrim.
     val chatBackdrop = rememberGraphicsLayer()
+    val readingEdgesBackdrop = rememberGraphicsLayer()
     var chatBackdropOrigin by remember { mutableStateOf(IntOffset.Zero) }
     // A GraphicsLayer receives its first display list during draw, while the
     // header and composer are composed in that same frame. Do not hand an
@@ -2924,7 +2949,13 @@ private fun ChatSurface(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (!composerFullscreenActive) {
-            if (turnGroups.isNotEmpty() && state.visibleHistoryStale) {
+            if (shouldShowChatStaleHistoryBar(
+                    hasTurns = turnGroups.isNotEmpty(),
+                    visibleHistoryStale = state.visibleHistoryStale,
+                    showConnectionBanner = showChatConnectionBanner,
+                    connection = state.connection,
+                )
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().widthIn(max = RagentSizes.ContentMaxWidth),
                     verticalAlignment = Alignment.CenterVertically,
@@ -2944,7 +2975,8 @@ private fun ChatSurface(
                 }
             }
             if (turnGroups.isEmpty() && state.sessionId != null && !state.visibleHistoryLoaded &&
-                !historyTransitioning && state.error == null) {
+                !historyTransitioning && state.error == null &&
+                !showChatConnectionBanner && state.connection == AgentConnectionStatus.Connected) {
                 Text(
                     stringResource(R.string.chat_history_unavailable),
                     style = MaterialTheme.typography.bodySmall,
@@ -3498,35 +3530,129 @@ private fun ChatSurface(
                 )),
         ) {
         // Layer 1: Conversation Canvas with Edge-to-Edge Frosted Backdrop
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-            if (!organizationHasCollaborators) {
-                val measuredDockHeight = with(density) { dockGeometry.visualHeightPx.toDp() }
-                val fallbackDockHeight = with(density) { readingNavigationInsets.getBottom(density).toDp() } +
-                    composerBottomSpacing + 68.dp
-                ChatBottomGradientMask(
-                    dockHeight = if (measuredDockHeight > 0.dp) measuredDockHeight else fallbackDockHeight,
-                    canvasColor = colors.canvas,
-                    backdropLayer = chatBackdropForControls,
-                    backdropOrigin = chatBackdropOrigin,
-                    presentationAlpha = if (readingPreparing) 0f else
-                        chatReadingAlpha(readingReveal) * chatWritingContextAlpha(composerFullscreenProgress),
-                    modifier = Modifier.align(Alignment.BottomCenter).zIndex(1.8f),
+        val edgeAuraController = LocalHorizonEdgeAuraController.current
+        val bottomSafeInsetPx = LocalSystemBottomInsetPx.current
+        val chatAuraPhase = resolveChatAuraPhase(
+            runStatus = state.runStatus,
+            voiceRecording = state.voice.recording,
+            voiceProcessing = state.voice.processing || state.voice.cloudAccessChecking,
+            hasError = state.error != null,
+            hasBlockingApproval = state.approval != null ||
+                (activeDecision?.takeUnless { it.isSubmitted }?.isBlocking == true),
+            hasTurns = turnGroups.isNotEmpty(),
+            hasDraftText = state.composerText.isNotBlank() || attachments.isNotEmpty(),
+        )
+        val imeBottomPx = imeInsets.getBottom(density)
+        val navBottomPx = readingNavigationInsets.getBottom(density)
+        val imeVisible = !organizationCollapsed && (imeBottomPx > navBottomPx + 4)
+        val showChatAura = !organizationHasCollaborators && !composerFullscreenActive && !entryPreparing
+        val isRestingAuraPhase = chatAuraPhase == AgentoAuraPhase.Idle || chatAuraPhase == AgentoAuraPhase.Completed
+        val chatAuraAmbient by animateFloatAsState(
+            targetValue = when {
+                imeVisible && isRestingAuraPhase -> 0.34f
+                imeVisible -> 0.46f
+                isRestingAuraPhase -> 0.72f
+                else -> 1.0f
+            },
+            animationSpec = tween(durationMillis = motionPolicy().duration(if (imeVisible) 220 else 420), easing = FastOutSlowInEasing),
+            label = "chat-aura-ambient",
+        )
+        val chatAuraHeight by animateFloatAsState(
+            targetValue = when {
+                imeVisible && isRestingAuraPhase -> 0.15f
+                imeVisible -> 0.19f
+                isRestingAuraPhase -> 0.27f
+                else -> 0.34f
+            },
+            animationSpec = tween(durationMillis = motionPolicy().duration(if (imeVisible) 220 else 420), easing = FastOutSlowInEasing),
+            label = "chat-aura-height",
+        )
+        SideEffect {
+            val controller = edgeAuraController ?: return@SideEffect
+            if (state.chatOpen && showChatAura) {
+                controller.register(
+                    HorizonEdgeAuraSpec(
+                        ownerKey = "chat",
+                        phase = chatAuraPhase,
+                        voiceLevel = state.voice.waveformLevel,
+                        ambientIntensity = chatAuraAmbient,
+                        heightFraction = chatAuraHeight,
+                        renderInEdgeStrip = !imeVisible,
+                    ),
                 )
+            } else {
+                controller.clear("chat")
+            }
+        }
+        DisposableEffect(edgeAuraController) {
+            onDispose {
+                edgeAuraController?.clear("chat")
+            }
+        }
+
+        val captureFullBackdrop = !organizationHasCollaborators
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (captureFullBackdrop) {
+                        Modifier
+                            .onGloballyPositioned { coordinates ->
+                                val position = coordinates.positionInRoot()
+                                chatBackdropOrigin = IntOffset(
+                                    x = position.x.roundToInt(),
+                                    y = position.y.roundToInt(),
+                                )
+                            }
+                            .drawWithContent {
+                                recordToLayer(chatBackdrop)
+                            }
+                    } else Modifier,
+                ),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            if (!organizationHasCollaborators) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            brush = if (colors.canvas.red < 0.5f) com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasDark
+                            else com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasLight,
+                        ),
+                )
+                if (!composerFullscreenActive && !entryPreparing) {
+                    AgentoHorizonAura(
+                        phase = chatAuraPhase,
+                        voiceLevel = state.voice.waveformLevel,
+                        ambientIntensity = chatAuraAmbient,
+                        heightFraction = chatAuraHeight,
+                        bottomBleedPx = if (imeVisible) 0f else bottomSafeInsetPx,
+                        sharedClock = edgeAuraController,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .then(if (organizationCollapsed) Modifier else Modifier.imePadding()),
+                    )
+                }
             }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .then(if (composerFullscreenActive || entryPreparing) Modifier.clearAndSetSemantics { } else Modifier)
                     .testTag("chat-reading-plane")
-                    .onGloballyPositioned { coordinates ->
-                        val position = coordinates.positionInRoot()
-                        chatBackdropOrigin = IntOffset(
-                            x = position.x.roundToInt(),
-                            y = position.y.roundToInt(),
-                        )
-                    }
+                    .then(
+                        if (!captureFullBackdrop) {
+                            Modifier.onGloballyPositioned { coordinates ->
+                                val position = coordinates.positionInRoot()
+                                chatBackdropOrigin = IntOffset(
+                                    x = position.x.roundToInt(),
+                                    y = position.y.roundToInt(),
+                                )
+                            }
+                        } else Modifier,
+                    )
                     .agentoReadingEdges(
-                        backdrop = chatBackdrop,
+                        backdrop = if (captureFullBackdrop) readingEdgesBackdrop else chatBackdrop,
                         topInsetPx = { readingSystemInsets.getTop(density).toFloat() },
                         bottomInsetPx = {
                             // The app safe viewport may have consumed navigation
@@ -3541,11 +3667,7 @@ private fun ChatSurface(
                         },
                         presentationAlpha = if (readingPreparing) 0f else
                             chatReadingAlpha(readingReveal) * chatWritingContextAlpha(composerFullscreenProgress),
-                    )
-                    .then(if (organizationHasCollaborators) Modifier else Modifier.background(
-                        brush = if (colors.canvas.red < 0.5f) com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasDark
-                        else com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasLight,
-                    )),
+                    ),
             ) {
                 Column(Modifier.fillMaxSize()) {
                     LazyColumn(
@@ -4428,13 +4550,33 @@ private fun ChatSurface(
     }
 }
 
+internal fun resolveChatAuraPhase(
+    runStatus: AgentRunStatus,
+    voiceRecording: Boolean,
+    voiceProcessing: Boolean,
+    hasError: Boolean,
+    hasBlockingApproval: Boolean,
+    hasTurns: Boolean,
+    hasDraftText: Boolean,
+): AgentoAuraPhase = when {
+    voiceRecording -> AgentoAuraPhase.Listening
+    voiceProcessing -> AgentoAuraPhase.Thinking
+    hasBlockingApproval -> AgentoAuraPhase.WaitingApproval
+    runStatus == AgentRunStatus.Working -> AgentoAuraPhase.Running
+    hasDraftText -> AgentoAuraPhase.Start
+    runStatus == AgentRunStatus.Failed -> AgentoAuraPhase.Error
+    runStatus == AgentRunStatus.Completed && hasTurns -> AgentoAuraPhase.Completed
+    else -> AgentoAuraPhase.Idle
+}
+
 @Composable
 private fun EmptyConversationSuggestionRail(
     onSuggestion: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val colors = LocalRagentColors.current
     val suggestions = listOf(
-        Triple(stringResource(R.string.workbench_suggestion_organize_project), AgentoWebGlyph.Folder, LocalRagentColors.current.accentPrimary),
+        Triple(stringResource(R.string.workbench_suggestion_organize_project), AgentoWebGlyph.Folder, colors.accentPrimary),
         Triple(stringResource(R.string.workbench_suggestion_explain_file), AgentoWebGlyph.File, Color(0xFF30D158)),
         Triple(stringResource(R.string.workbench_suggestion_create_plan), AgentoWebGlyph.TargetArrow, Color(0xFFBF5AF2)),
     )
@@ -4446,13 +4588,19 @@ private fun EmptyConversationSuggestionRail(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        Text(
+            text = stringResource(AgentUiR.string.agentui_composer_prompt),
+            style = RagentTextStyles.caption.copy(fontWeight = FontWeight.Medium),
+            color = colors.secondaryContent,
+            modifier = Modifier.padding(bottom = 2.dp),
+        )
         suggestions.forEach { (text, glyph, glyphTint) ->
             EmptyConversationSuggestion(
                 text = text,
                 glyph = glyph,
                 glyphTint = glyphTint,
                 onClick = { onSuggestion(text) },
-                modifier = Modifier.widthIn(min = 190.dp, max = 300.dp),
+                modifier = Modifier.widthIn(min = 190.dp, max = 308.dp),
             )
         }
     }
@@ -4471,25 +4619,34 @@ private fun EmptyConversationSuggestion(
     AgentoFrostedGlassBox(
         modifier = modifier
             .heightIn(min = 42.dp)
-            .agentoPressScale(pressedScale = 0.94f, onClick = onClick),
+            .agentoPressScale(pressedScale = 0.95f, onClick = onClick),
         shape = AgentoShapes.PillShape,
-        surface = AgentoGlassSurface.Tinted(if (isDark) Color(0x28FFFFFF) else Color(0xEEFFFFFF)),
+        surface = AgentoGlassSurface.Tinted(if (isDark) Color(0x26FFFFFF) else Color(0xF0FFFFFF)),
         blurRadius = AgentoFrostedTokens.BlurStandard,
         showTopHairline = true,
+        specularBrush = if (isDark) AgentoFrostedTokens.SpecularBorderDark else AgentoFrostedTokens.SpecularBorderLight,
         hasShadow = true,
-        shadowElevation = 4.dp,
+        shadowElevation = 3.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            AgentoWebIcon(
-                glyph = glyph,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = glyphTint,
-            )
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(glyphTint.copy(alpha = if (isDark) 0.18f else 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                AgentoWebIcon(
+                    glyph = glyph,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp),
+                    tint = glyphTint,
+                )
+            }
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodyMedium.copy(
@@ -4858,48 +5015,51 @@ private fun PlanArtifactCard(
     onAction: (String, String) -> Unit,
 ) {
     val colors = LocalRagentColors.current
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = AgentoShapes.SquircleL,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+    val doneCount = remember(plan.items) { plan.items.count { it.status == "completed" } }
+    AgentoArtifactSurface(
+        title = plan.title,
+        subtitle = "${plan.state} · r${plan.revision}",
+        glyph = AgentoWebGlyph.TargetArrow,
+        badge = if (plan.items.isNotEmpty()) {
+            {
+                Text(
+                    text = "$doneCount / ${plan.items.size}",
+                    style = RagentTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.accentPrimary,
+                )
+            }
+        } else null,
+        actions = {
+            AgentoButton(
+                text = "Revise",
+                onClick = { onAction(plan.planId, "revise") },
+                modifier = Modifier.weight(1f),
+                secondary = true,
+            )
+            AgentoButton(
+                text = "Execute",
+                onClick = { onAction(plan.planId, "execute") },
+                modifier = Modifier.weight(1f),
+            )
+        },
     ) {
-        Column(
-            modifier = Modifier.padding(RagentSpacing.Standard),
-            verticalArrangement = Arrangement.spacedBy(RagentSpacing.Compact),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(plan.title, style = RagentTextStyles.pageTitle, color = colors.primaryContent)
-                Text("${plan.state} · r${plan.revision}", style = RagentTextStyles.caption, color = colors.secondaryContent)
-            }
-            if (plan.items.isEmpty()) {
-                Text("Preparing steps", style = RagentTextStyles.caption, color = colors.secondaryContent)
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    plan.items.forEachIndexed { index, step ->
-                        Text(
-                            text = "${if (step.status == "completed") "✓" else "○"}  ${index + 1}. ${step.text}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.primaryContent,
-                        )
-                    }
+        if (plan.items.isNotEmpty()) {
+            AgentoProgressBar(
+                progress = doneCount.toFloat() / plan.items.size.toFloat(),
+                accentColor = colors.accentPrimary,
+            )
+        }
+        if (plan.items.isEmpty()) {
+            Text("Preparing steps", style = RagentTextStyles.caption, color = colors.secondaryContent)
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                plan.items.forEachIndexed { index, step ->
+                    Text(
+                        text = "${if (step.status == "completed") "✓" else "○"}  ${index + 1}. ${step.text}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (step.status == "completed") colors.secondaryContent else colors.primaryContent,
+                    )
                 }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(RagentSpacing.Compact)) {
-                AgentoButton(
-                    text = "Revise",
-                    onClick = { onAction(plan.planId, "revise") },
-                    modifier = Modifier.weight(1f),
-                    secondary = true,
-                )
-                AgentoButton(
-                    text = "Execute",
-                    onClick = { onAction(plan.planId, "execute") },
-                    modifier = Modifier.weight(1f),
-                )
             }
         }
     }
@@ -5950,25 +6110,23 @@ private fun SettingsOverviewContent(
                         else onEvent(WorkbenchEvent.OpenComputerSetup)
                     })
                 AgentoSettingRow(leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Info) },
-                    title = stringResource(R.string.journey_connection_help), showDivider = false,
+                    title = stringResource(R.string.journey_connection_help),
                     modifier = Modifier.testTag("settings-connection-help"), onClick = { onEvent(WorkbenchEvent.OpenComputerSetup) })
-            }
-        }
-        item(key = "voice-settings-entry") {
-            SettingsGroup(modifier = Modifier.widthIn(max = RagentSizes.ContentMaxWidth)) {
-                AgentoSettingRow(
-                    leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Microphone) },
-                    title = stringResource(R.string.settings_voice),
-                    subtitle = stringResource(R.string.settings_voice_summary),
-                    showDivider = false,
-                    modifier = Modifier.testTag("settings-voice"),
-                    onClick = { onEvent(WorkbenchEvent.OpenSettingsPage(SettingsPage.Voice)) },
-                )
+                AgentoSettingRow(leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Share) },
+                    title = stringResource(R.string.settings_sharing_agents), showDivider = false,
+                    modifier = Modifier.testTag("settings-sharing-agents"), onClick = { onEvent(WorkbenchEvent.OpenAppApiSettings) })
             }
         }
         item(key = "models-runtime") {
             SettingsGroup(title = stringResource(R.string.settings_models_runtime),
                 modifier = Modifier.widthIn(max = RagentSizes.ContentMaxWidth)) {
+                AgentoSettingRow(
+                    leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Microphone) },
+                    title = stringResource(R.string.settings_voice),
+                    subtitle = stringResource(R.string.settings_voice_summary),
+                    modifier = Modifier.testTag("settings-voice"),
+                    onClick = { onEvent(WorkbenchEvent.OpenSettingsPage(SettingsPage.Voice)) },
+                )
                 AgentoSettingRow(leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Terminal) },
                     title = stringResource(R.string.settings_model_providers),
                     modifier = Modifier.testTag("settings-model-providers"),
@@ -5993,14 +6151,6 @@ private fun SettingsOverviewContent(
                 AgentoSettingRow(leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Info) },
                     title = stringResource(R.string.settings_push_diagnostics),
                     modifier = Modifier.testTag("settings-push-diagnostics"), onClick = { onEvent(WorkbenchEvent.OpenPushDiagnostics) })
-                AgentoSettingRow(leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Share) },
-                    title = stringResource(R.string.settings_sharing_agents), showDivider = false,
-                    modifier = Modifier.testTag("settings-sharing-agents"), onClick = { onEvent(WorkbenchEvent.OpenAppApiSettings) })
-            }
-        }
-        item(key = "support") {
-            SettingsGroup(title = stringResource(R.string.settings_group_about),
-                modifier = Modifier.widthIn(max = RagentSizes.ContentMaxWidth)) {
                 AgentoSettingRow(leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Report) },
                     title = stringResource(R.string.content_report_settings), modifier = Modifier.testTag("settings-content-reports"),
                     onClick = { onEvent(WorkbenchEvent.ReportAgentContent()) })
@@ -6464,6 +6614,72 @@ private fun SettingsDetailSurface(
                         }
                     }
                     SettingsPage.Theme -> {
+                        item(key = "theme_preview_strip") {
+                            val monetAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                            val themes = listOf(
+                                AppTheme.System to R.string.theme_system,
+                                AppTheme.Dark to R.string.theme_dark,
+                                AppTheme.Light to R.string.theme_light,
+                                AppTheme.Oled to R.string.theme_oled,
+                                AppTheme.Amber to R.string.theme_amber,
+                                AppTheme.Monet to R.string.theme_monet,
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = RagentSizes.ContentMaxWidth)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                themes.forEach { (theme, titleRes) ->
+                                    val isEnabled = theme != AppTheme.Monet || monetAvailable
+                                    val isSelected = state.appTheme == theme
+                                    val themeColors = LocalRagentColors.current
+                                    Column(
+                                        modifier = Modifier
+                                            .width(106.dp)
+                                            .then(
+                                                if (isEnabled) Modifier.agentoPressScale(
+                                                    pressedScale = 0.96f,
+                                                    onClick = { onEvent(WorkbenchEvent.SelectTheme(theme)) },
+                                                ) else Modifier.alpha(0.45f),
+                                            )
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(
+                                                if (isSelected) themeColors.accentPrimary.copy(alpha = 0.12f)
+                                                else themeColors.quietSurface,
+                                            )
+                                            .border(
+                                                width = if (isSelected) 1.5.dp else 0.75.dp,
+                                                color = if (isSelected) {
+                                                    themeColors.accentPrimary
+                                                } else {
+                                                    themeColors.primaryContent.copy(
+                                                        alpha = if (themeColors.canvas.red < 0.5f) 0.18f else 0.10f,
+                                                    )
+                                                },
+                                                shape = RoundedCornerShape(16.dp),
+                                            )
+                                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        SettingsThemeSwatch(theme)
+                                        Text(
+                                            text = stringResource(titleRes),
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                                lineHeight = 14.sp,
+                                            ),
+                                            color = if (isSelected) themeColors.accentPrimary else themeColors.primaryContent,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         item(key = "theme_group") {
                             val monetAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                             SettingsGroup(

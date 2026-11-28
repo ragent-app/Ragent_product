@@ -13,12 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.GppMaybe
-import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -35,6 +31,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.andysagent.ragent.core.designsystem.AgentoButton
 import com.andysagent.ragent.core.designsystem.AgentoShapes
+import com.andysagent.ragent.core.designsystem.AgentoWebGlyph
+import com.andysagent.ragent.core.designsystem.AgentoWebIcon
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.data.VoiceApprovalCardDto
@@ -98,8 +96,8 @@ fun ButlerVisualApprovalCardContent(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(
-                imageVector = if (isHighRisk) Icons.Rounded.GppMaybe else Icons.Rounded.VerifiedUser,
+            AgentoWebIcon(
+                glyph = if (isHighRisk) AgentoWebGlyph.ShieldSolid else AgentoWebGlyph.Shield,
                 contentDescription = null,
                 tint = if (isHighRisk) colors.error else colors.actionPrimary,
                 modifier = Modifier.size(24.dp),

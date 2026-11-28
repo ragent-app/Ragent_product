@@ -163,8 +163,8 @@ fun OwnerReportNodeScreen(repo: FactoryWorkflowRepository, organizationId: Strin
             Text(stringResource(R.string.owner_node_choose_effort))
             efforts.forEach { value -> Row(Modifier.fillMaxWidth()) { RadioButton(selected = effort == value, onClick = { effort = value; previewDigest = "" }); Text(value, Modifier.padding(top = 12.dp)) } }
             Text(stringResource(R.string.owner_node_budget), color = colors.secondaryContent)
-            OutlinedTextField(value = tokenLimit, onValueChange = { tokenLimit = it; previewDigest = ""; previewInput = null }, label = { Text(stringResource(R.string.owner_node_tokens)) }, singleLine = true)
-            OutlinedTextField(value = costLimit, onValueChange = { costLimit = it; previewDigest = ""; previewInput = null }, label = { Text(stringResource(R.string.owner_node_cost)) }, singleLine = true)
+            AgentoTextField(value = tokenLimit, onValueChange = { tokenLimit = it; previewDigest = ""; previewInput = null }, label = stringResource(R.string.owner_node_tokens), singleLine = true, showLabelWhenFilled = true)
+            AgentoTextField(value = costLimit, onValueChange = { costLimit = it; previewDigest = ""; previewInput = null }, label = stringResource(R.string.owner_node_cost), singleLine = true, showLabelWhenFilled = true)
             AgentoButton(stringResource(R.string.owner_node_preview), enabled = !busy && stableAccountScope && readOnlyAvailable && agents.any { it.text("agentId") == agentId } && selectedCatalog != null && availableModels.any { it.text("model") == model } && effort in efforts, onClick = {
                 val revision = (catalog?.get("revision") as? JsonPrimitive)?.intOrNull
                 if (revision == null) { status = conflictText; return@AgentoButton }

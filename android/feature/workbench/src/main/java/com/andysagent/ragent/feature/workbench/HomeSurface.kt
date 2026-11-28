@@ -7,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,7 +65,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andysagent.ragent.core.agentui.AgentConnectionStatus
+import com.andysagent.ragent.core.designsystem.AgentoAuraPhase
 import com.andysagent.ragent.core.designsystem.AgentoBreathingDot
+import com.andysagent.ragent.core.designsystem.AgentoHorizonAura
+import com.andysagent.ragent.core.designsystem.HorizonEdgeAuraSpec
+import com.andysagent.ragent.core.designsystem.LocalHorizonEdgeAuraController
+import com.andysagent.ragent.core.designsystem.LocalSystemBottomInsetPx
 import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
 import com.andysagent.ragent.core.designsystem.AgentoGlassSurface
 import com.andysagent.ragent.core.designsystem.AgentoGlassMaterial
@@ -189,6 +197,7 @@ fun HomeSurface(
     onEvent: (WorkbenchEvent) -> Unit,
     windowSizeClass: AgentoWindowSizeClass,
     modifier: Modifier = Modifier,
+    isActivePage: Boolean = true,
 ) {
     val summary = remember(state.sessions) { HomeReferenceSpec.fromSessions(state.sessions) }
     val palette = homePalette()
@@ -203,6 +212,38 @@ fun HomeSurface(
     val contentModifier = Modifier
         .fillMaxWidth()
         .widthIn(max = RagentSizes.DetailMaxWidth)
+
+    val homeAuraPhase = remember(summary, isCompletelyEmpty) {
+        when {
+            isCompletelyEmpty -> AgentoAuraPhase.Idle
+            summary.focus.any { it.status == SessionStatus.WaitingApproval } -> AgentoAuraPhase.WaitingApproval
+            summary.running.isNotEmpty() -> AgentoAuraPhase.Running
+            else -> AgentoAuraPhase.Idle
+        }
+    }
+    val edgeAuraController = LocalHorizonEdgeAuraController.current
+    val bottomSafeInsetPx = LocalSystemBottomInsetPx.current
+    SideEffect {
+        val controller = edgeAuraController ?: return@SideEffect
+        if (isActivePage && !state.projectCatalogLoading) {
+            controller.register(
+                HorizonEdgeAuraSpec(
+                    ownerKey = "home",
+                    phase = homeAuraPhase,
+                    ambientIntensity = 0.48f,
+                    heightFraction = 0.25f,
+                    renderInEdgeStrip = true,
+                ),
+            )
+        } else {
+            controller.clear("home")
+        }
+    }
+    DisposableEffect(edgeAuraController) {
+        onDispose {
+            edgeAuraController?.clear("home")
+        }
+    }
 
     if (state.projectCatalogLoading) {
         HomeCatalogLoadingSkeleton(
@@ -222,6 +263,16 @@ fun HomeSurface(
                 .fillMaxSize()
                 .background(canvasBrush),
         ) {
+            AgentoHorizonAura(
+                phase = AgentoAuraPhase.Idle,
+                ambientIntensity = 0.48f,
+                heightFraction = 0.25f,
+                bottomBleedPx = bottomSafeInsetPx,
+                sharedClock = edgeAuraController,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth(),
+            )
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -270,6 +321,16 @@ fun HomeSurface(
             // nested-scroll deltas that a LazyColumn consumes itself.
             .pullRefresh(pullRefreshState),
     ) {
+        AgentoHorizonAura(
+            phase = homeAuraPhase,
+            ambientIntensity = 0.48f,
+            heightFraction = 0.25f,
+            bottomBleedPx = bottomSafeInsetPx,
+            sharedClock = edgeAuraController,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+        )
         // Pull refresh is intentionally confined to Home, where people expect
         // cross-device work to update. It refreshes in place: cached projects
         // remain readable rather than regressing to a full-screen loader.
@@ -341,9 +402,51 @@ fun HomeSurface(
 
                 if (summary.focus.isEmpty()) {
                     item(key = "home-quiet") {
-                        Text(stringResource(R.string.journey_home_quiet),
-                            style = MaterialTheme.typography.bodyMedium, color = palette.secondary,
-                            modifier = contentModifier.padding(horizontal = 12.dp).testTag("home-quiet"))
+                        HomeSectionGroup(palette = palette, modifier = contentModifier) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.journey_home_quiet),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = palette.secondary,
+                                    modifier = Modifier.testTag("home-quiet"),
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .heightIn(min = 38.dp)
+                                            .clip(AgentoShapes.PillShape)
+                                            .background(palette.action.copy(alpha = if (isDark) 0.18f else 0.11f))
+                                            .agentoPressScale(
+                                                pressedScale = 0.96f,
+                                                onClick = { onEvent(WorkbenchEvent.SelectDestination(AgentoDestination.Sessions)) },
+                                            )
+                                            .padding(horizontal = 13.dp, vertical = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        AgentoWebIcon(
+                                            glyph = AgentoWebGlyph.Chat,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = palette.action,
+                                        )
+                                        Text(
+                                            text = stringResource(R.string.projects_start_chat),
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = palette.action,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 if (summary.focus.isNotEmpty()) {
@@ -629,7 +732,10 @@ private fun NeedsAttentionSection(
                 )
             }
         }
-        HomeSectionGroup(palette = palette) {
+        HomeSectionGroup(
+            palette = palette,
+            borderColor = palette.attention.copy(alpha = 0.35f),
+        ) {
             visibleSessions.forEachIndexed { index, session ->
                 AttentionRow(
                     session = session,
@@ -797,21 +903,85 @@ private fun RecentProjectsSection(
     HomeSection(
         title = stringResource(R.string.home_recent_projects),
         palette = palette,
-        grouped = true,
+        grouped = false,
         actionLabel = stringResource(R.string.home_view_all_projects).takeIf {
             recentProjects.size > previewProjects.size
         },
         onAction = onOpenAllProjects,
         modifier = modifier,
     ) {
-        previewProjects.forEachIndexed { index, project ->
-            ProjectRow(
-                projectName = project.name,
-                pendingApprovals = 0,
-                onClick = { onOpenProject(project.id) },
-                palette = palette,
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            previewProjects.chunked(2).forEach { rowProjects ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    rowProjects.forEach { project ->
+                        ProjectTileCard(
+                            projectName = project.name,
+                            onClick = { onOpenProject(project.id) },
+                            palette = palette,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    if (rowProjects.size == 1) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectTileCard(
+    projectName: String,
+    onClick: () -> Unit,
+    palette: HomePalette,
+    modifier: Modifier = Modifier,
+) {
+    HomeSectionGroup(
+        palette = palette,
+        modifier = modifier.agentoPressScale(pressedScale = 0.97f, onClick = onClick),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 84.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AgentoWebIcon(
+                    glyph = AgentoWebGlyph.Folder,
+                    contentDescription = null,
+                    modifier = Modifier.size(19.dp),
+                    tint = palette.action,
+                )
+                AgentoWebIcon(
+                    glyph = AgentoWebGlyph.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = palette.tertiary,
+                )
+            }
+            Text(
+                text = projectName,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = palette.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            if (index < previewProjects.lastIndex) HomeDivider(palette)
         }
     }
 }
@@ -1036,6 +1206,7 @@ private fun HomeSection(
 private fun HomeSectionGroup(
     palette: HomePalette,
     modifier: Modifier = Modifier,
+    borderColor: Color? = null,
     content: @Composable () -> Unit,
 ) {
     val colors = LocalRagentColors.current
@@ -1053,7 +1224,8 @@ private fun HomeSectionGroup(
                 spotColor = Color.Black.copy(alpha = if (isDark) 0.14f else 0.035f),
             )
             .clip(cardShape)
-            .background(cardBg),
+            .background(cardBg)
+            .then(if (borderColor != null) Modifier.border(0.75.dp, borderColor, cardShape) else Modifier),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),

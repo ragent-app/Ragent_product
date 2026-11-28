@@ -383,14 +383,14 @@ fun FactoryTeamWorkspace(
             when (screen) {
                 "list" -> LazyColumn(state = listState, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item { Text(stringResource(R.string.factory_ux_subtitle), color = colors.secondaryContent) }
-                    item { OutlinedTextField(objective, { objective = it }, label = { Text(stringResource(R.string.factory_ux_question)) }, modifier = Modifier.fillMaxWidth(), minLines = 2) }
+                    item { AgentoTextField(objective, { objective = it }, label = stringResource(R.string.factory_ux_question), modifier = Modifier.fillMaxWidth(), singleLine = false, minLines = 2, showLabelWhenFilled = true) }
                     if (eligibleNodes.size == 1) item { Text(stringResource(R.string.factory_team_assigned, eligibleNodes.single().displayName.ifBlank { eligibleNodes.single().id }), color = colors.secondaryContent) }
                     item { Text(stringResource(R.string.factory_review_attempts_note), color = colors.secondaryContent)
                         Row { TextButton(onClick = { attempts = 1 }) { Text(stringResource(R.string.factory_review_attempts_one) + if (attempts == 1) " ✓" else "") }
                             TextButton(onClick = { attempts = 2 }) { Text(stringResource(R.string.factory_review_attempts_two) + if (attempts == 2) " ✓" else "") } }
                     }
                     item { TextButton(onClick = { settingsOpen = !settingsOpen }) { Text(stringResource(R.string.factory_ux_review_settings)) }
-                        if (settingsOpen) OutlinedTextField(criterion, { criterion = it }, label = { Text(stringResource(R.string.factory_ux_criterion)) }, modifier = Modifier.fillMaxWidth()) }
+                        if (settingsOpen) AgentoTextField(criterion, { criterion = it }, label = stringResource(R.string.factory_ux_criterion), modifier = Modifier.fillMaxWidth(), showLabelWhenFilled = true) }
                     item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AgentoButton(stringResource(R.string.factory_ux_save), onClick = { if (nodeId.isBlank() || sessionProject.isBlank()) page = "createWork" else saveDraft() }, enabled = pending == null && !loading && goalsLoaded && objective.isNotBlank())
                         AgentoButton(stringResource(R.string.factory_team_08), onClick = { scope.launch { refresh() } }, enabled = !loading, secondary = true)
@@ -420,7 +420,7 @@ fun FactoryTeamWorkspace(
                 "createGoal" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.factory_team_13), color = colors.secondaryContent)
                     Text(stringResource(R.string.factory_team_project, project), color = colors.secondaryContent)
-                    OutlinedTextField(goalText, { goalText = it }, label = { Text(stringResource(R.string.factory_team_14)) }, modifier = Modifier.fillMaxWidth())
+                    AgentoTextField(goalText, { goalText = it }, label = stringResource(R.string.factory_team_14), modifier = Modifier.fillMaxWidth(), singleLine = false, showLabelWhenFilled = true)
                     AgentoButton(stringResource(R.string.factory_team_15), enabled = project.isNotBlank() && goalText.isNotBlank() && pending == null && !loading, onClick = {
                         val p = project.trim(); val g = goalText.trim(); prepare("goal", buildJsonObject { put("project",p); put("objective",g) })
                     })
@@ -444,12 +444,12 @@ fun FactoryTeamWorkspace(
                     eligibleNodes.forEach { node -> AgentoRowSurface(selected = nodeId == node.id, onClick = { nodeId = node.id; nodeChoiceConfirmed = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(node.displayName.ifBlank { node.id }, Modifier.padding(12.dp), color = colors.primaryContent)
                     } }
-                    OutlinedTextField(objective, { objective = it }, label = { Text(stringResource(R.string.factory_team_20)) }, modifier = Modifier.fillMaxWidth())
+                    AgentoTextField(objective, { objective = it }, label = stringResource(R.string.factory_team_20), modifier = Modifier.fillMaxWidth(), singleLine = false, showLabelWhenFilled = true)
                     Text(stringResource(R.string.factory_review_attempts_note), color = colors.secondaryContent)
                     Row { TextButton(onClick = { attempts = 1 }) { Text(stringResource(R.string.factory_review_attempts_one) + if (attempts == 1) " ✓" else "") }
                         TextButton(onClick = { attempts = 2 }) { Text(stringResource(R.string.factory_review_attempts_two) + if (attempts == 2) " ✓" else "") } }
                     TextButton(onClick = { settingsOpen = !settingsOpen }) { Text(stringResource(R.string.factory_ux_review_settings)) }
-                    if (settingsOpen) OutlinedTextField(criterion, { criterion = it }, label = { Text(stringResource(R.string.factory_ux_criterion)) }, modifier = Modifier.fillMaxWidth())
+                    if (settingsOpen) AgentoTextField(criterion, { criterion = it }, label = stringResource(R.string.factory_ux_criterion), modifier = Modifier.fillMaxWidth(), showLabelWhenFilled = true)
                     AgentoButton(stringResource(R.string.factory_ux_save), enabled = goalsLoaded && sessionProject.isNotBlank() && eligibleNodes.any { it.id == nodeId } && objective.isNotBlank() && pending == null && !loading, onClick = { saveDraft() })
                     Text(stringResource(R.string.factory_ux_save_note), color = colors.secondaryContent)
                 }
@@ -687,8 +687,8 @@ fun FactoryTeamWorkspace(
                             else Text(stringResource(R.string.factory_ux_budget_optional), color = colors.secondaryContent)
                             TextButton(enabled = pending == null && !loading && !needsRefresh, onClick = { startSettings = !startSettings }) { Text(stringResource(R.string.factory_ux_set_budget)) }
                                 if (startSettings) {
-                                    OutlinedTextField(tokens, { tokens = it }, label = { Text(stringResource(R.string.factory_team_22)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                                    OutlinedTextField(cost, { cost = it }, label = { Text(stringResource(R.string.factory_team_23)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                    AgentoTextField(tokens, { tokens = it }, label = stringResource(R.string.factory_team_22), modifier = Modifier.fillMaxWidth(), singleLine = true, showLabelWhenFilled = true)
+                                    AgentoTextField(cost, { cost = it }, label = stringResource(R.string.factory_team_23), modifier = Modifier.fillMaxWidth(), singleLine = true, showLabelWhenFilled = true)
                                     Text(stringResource(R.string.factory_ux_budget_note), color = colors.secondaryContent)
                                     if (unsavedBudget) Text(stringResource(R.string.factory_ux_budget_unsaved), color = colors.secondaryContent)
                                     AgentoButton(stringResource(R.string.factory_ux_save_settings), enabled = pending == null && !loading && !needsRefresh && (tokens.toLongOrNull()?.let { it in 1..9_007_199_254_740_991L } == true) && (cost.toDoubleOrNull()?.let { it.isFinite() && it > 0 } == true), onClick = {
@@ -742,11 +742,11 @@ fun FactoryTeamWorkspace(
                                             else if (selectedExcerpts.size < 20 && selectedExcerpts.sumOf { it.second.toByteArray(Charsets.UTF_8).size } + excerpt.toByteArray(Charsets.UTF_8).size <= 11000) selectedExcerpts + (start to excerpt) else selectedExcerpts
                                         reviewDecision = null
                                     }) { Text((if (selectedPassage) "✓ " else "") + excerpt) }
-                                    if (selectedPassage) OutlinedTextField(passageReasons[start].orEmpty(), { passageReasons = passageReasons + (start to it.take(1200)) }, label = { Text(stringResource(R.string.factory_review_passage_reason)) }, modifier = Modifier.fillMaxWidth())
+                                    if (selectedPassage) AgentoTextField(passageReasons[start].orEmpty(), { passageReasons = passageReasons + (start to it.take(1200)) }, label = stringResource(R.string.factory_review_passage_reason), modifier = Modifier.fillMaxWidth(), singleLine = false, showLabelWhenFilled = true)
                                 }
                             }
                             Text(stringResource(R.string.factory_review_passage_count, selectedExcerpts.size), color = colors.secondaryContent)
-                            OutlinedTextField(rationale, { rationale = it }, label = { Text(stringResource(R.string.factory_team_31)) }, modifier = Modifier.fillMaxWidth())
+                            AgentoTextField(rationale, { rationale = it }, label = stringResource(R.string.factory_team_31), modifier = Modifier.fillMaxWidth(), singleLine = false, showLabelWhenFilled = true)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 AgentoButton(stringResource(R.string.factory_team_32), onClick = { reviewDecision = "passed" }, enabled = pending == null && !loading && !needsRefresh && manual != null, secondary = true)
                                 AgentoButton(stringResource(R.string.factory_team_33), onClick = { reviewDecision = "failed" }, enabled = pending == null && !loading && !needsRefresh && manual != null, secondary = true)

@@ -456,6 +456,7 @@ fun AgentoFrostedModalBottomSheet(
     backdropLayer: GraphicsLayer?,
     modifier: Modifier = Modifier,
     shape: androidx.compose.ui.graphics.Shape = AgentoShapes.BottomSheetShape,
+    edgeToEdgeBottom: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = LocalRagentColors.current
@@ -556,7 +557,7 @@ fun AgentoFrostedModalBottomSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding(),
+                        .then(if (edgeToEdgeBottom) Modifier else Modifier.navigationBarsPadding()),
                 ) {
                     Box(
                         modifier = Modifier
@@ -891,6 +892,9 @@ fun AgentoTextField(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     singleLine: Boolean = true,
+    minLines: Int = 1,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
+    showLabelWhenFilled: Boolean = false,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     inputModifier: Modifier = Modifier,
@@ -900,18 +904,27 @@ fun AgentoTextField(
     val fieldShape = RoundedCornerShape(14.dp)
     val fieldBg = if (isDark) Color(0xFF242730).copy(alpha = 0.85f) else AgentoFrostedTokens.LightSurfaceLevel2.copy(alpha = 0.85f)
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = RagentSpacing.TouchTarget)
             .clip(fieldShape)
-            .background(fieldBg),
-        contentAlignment = Alignment.CenterStart,
+            .background(fieldBg)
+            .padding(horizontal = 14.dp, vertical = if (showLabelWhenFilled && value.isNotEmpty()) 8.dp else 12.dp),
+        verticalArrangement = Arrangement.Center,
     ) {
+        if (showLabelWhenFilled && value.isNotEmpty() && label.isNotBlank()) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary.copy(alpha = 0.82f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(bottom = 2.dp),
+            )
+        }
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.CenterStart,
         ) {
             if (value.isEmpty()) {
@@ -926,6 +939,8 @@ fun AgentoTextField(
                 onValueChange = onValueChange,
                 enabled = enabled,
                 singleLine = singleLine,
+                minLines = minLines,
+                maxLines = maxLines,
                 keyboardOptions = keyboardOptions,
                 keyboardActions = keyboardActions,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.primaryContent),

@@ -9,6 +9,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
@@ -49,7 +50,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -74,7 +79,10 @@ import com.andysagent.ragent.core.agentui.ClassicForkIcon
 import com.andysagent.ragent.core.agentui.FinalizedMarkdownMessage
 import com.andysagent.ragent.core.agentui.collapsedBubbleFadeMask
 import com.andysagent.ragent.core.agentui.R as AgentUiR
+import com.andysagent.ragent.core.designsystem.AgentoArtifactSurface
+import com.andysagent.ragent.core.designsystem.AgentoBreathingDot
 import com.andysagent.ragent.core.designsystem.AgentoButton
+import com.andysagent.ragent.core.designsystem.AgentoProgressBar
 import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
 import com.andysagent.ragent.core.designsystem.AgentoGlassSurface
 import com.andysagent.ragent.core.designsystem.AgentoGlassMaterial
@@ -351,7 +359,11 @@ fun UserPromptBlock(
 ) {
     val colors = LocalRagentColors.current
     val isDark = colors.canvas.red < 0.5f
-    val bubbleColor = if (isDark) Ragentolors.SurfaceLevel1 else colors.surfaceHigh
+    val bubbleColor = if (isDark) {
+        if (colors.surfaceHigh.alpha >= 0.99f) colors.surfaceHigh else Color(0xFF1C1C22)
+    } else {
+        if (colors.surfaceHigh.alpha >= 0.99f) colors.surfaceHigh else Color(0xFFE9EBF1)
+    }
     val clipboardManager = LocalClipboardManager.current
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -567,6 +579,7 @@ fun AgentProgressBlock(
 @Composable
 internal fun ThinkingRow(operation: TimelineItem.Operation) {
     val colors = LocalRagentColors.current
+    val isDark = colors.canvas.red < 0.5f
     val hasDetail = operation.detail.isNotBlank()
     val active = operation.status == TimelineOperationStatus.InProgress || operation.status == TimelineOperationStatus.Pending
     var expanded by rememberSaveable(operation.id) { mutableStateOf(active && hasDetail) }
@@ -579,25 +592,82 @@ internal fun ThinkingRow(operation: TimelineItem.Operation) {
             scrollState.animateScrollTo(max)
         }
     }
+    val previewLine = remember(operation.detail) {
+        operation.detail.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()
+    }
     val toggleLabel = stringResource(if (expanded) R.string.timeline_details_hide else R.string.timeline_details_show)
     Column(Modifier.fillMaxWidth().testTag("thinking-row")) {
         Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (expanded || active) (if (isDark) Color(0xFF141418) else colors.surfaceLow) else Color.Transparent)
+                .then(
+                    if (expanded || active) Modifier.border(0.5.dp, colors.subtleOutline, RoundedCornerShape(10.dp))
+                    else Modifier
+                )
                 .clickable(enabled = hasDetail) { expanded = !expanded }
                 .semantics { contentDescription = toggleLabel }
-                .padding(horizontal = 4.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(stringResource(R.string.timeline_thinking), style = MaterialTheme.typography.bodySmall,
-                color = colors.secondaryContent, maxLines = 1)
-            if (hasDetail) AgentoWebIcon(if (expanded) AgentoWebGlyph.ChevronDown else AgentoWebGlyph.ChevronRight, null,
-                modifier = Modifier.size(14.dp), tint = colors.secondaryContent)
+            if (active) {
+                AgentoBreathingDot(color = colors.stateRunning, size = 6.dp)
+            }
+            Text(
+                text = stringResource(R.string.timeline_thinking),
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = if (active || expanded) FontWeight.SemiBold else FontWeight.Medium,
+                ),
+                color = if (active) colors.primaryContent else colors.secondaryContent,
+                maxLines = 1,
+            )
+            if (!expanded && hasDetail && previewLine.isNotEmpty()) {
+                Text(
+                    text = previewLine,
+                    modifier = Modifier.weight(1f, fill = false),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.tertiaryContent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
+            if (hasDetail) {
+                AgentoWebIcon(
+                    glyph = if (expanded) AgentoWebGlyph.ChevronDown else AgentoWebGlyph.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = colors.secondaryContent,
+                )
+            }
         }
         AnimatedVisibility(expanded && hasDetail) {
-            SelectionContainer(Modifier.heightIn(max = 220.dp).verticalScroll(scrollState).testTag("thinking-content")) {
-                Text(operation.detail, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
-                    style = MaterialTheme.typography.bodySmall, color = colors.secondaryContent)
+            SelectionContainer(
+                Modifier
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(scrollState)
+                    .testTag("thinking-content"),
+            ) {
+                Text(
+                    text = operation.detail,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .drawBehind {
+                            drawRoundRect(
+                                color = if (active) colors.stateRunning.copy(alpha = 0.55f) else colors.subtleOutline,
+                                topLeft = Offset(3.dp.toPx(), 4.dp.toPx()),
+                                size = Size(2.dp.toPx(), (size.height - 8.dp.toPx()).coerceAtLeast(4.dp.toPx())),
+                                cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx()),
+                            )
+                        }
+                        .padding(start = 11.dp, end = 6.dp, top = 4.dp, bottom = 6.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.secondaryContent,
+                )
             }
         }
     }
@@ -742,88 +812,82 @@ fun PlanBlock(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalRagentColors.current
-    val isDark = colors.canvas.red < 0.5f
     var expanded by rememberSaveable { mutableStateOf(true) }
+    val doneCount = remember(plan.items) { plan.items.count { it.status.equals("completed", ignoreCase = true) } }
+    val totalCount = plan.items.size
 
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = if (isDark) Color(0xFF1E1E22) else Color(0xFFF4F4F5),
-        border = BorderStroke(0.5.dp, if (isDark) Color(0x26FFFFFF) else Color(0x14000000)),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    AgentoArtifactSurface(
+        title = plan.title.ifBlank { "Task Plan" },
+        subtitle = if (totalCount > 0) "$doneCount / $totalCount" else null,
+        glyph = AgentoWebGlyph.TargetArrow,
+        badge = {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded },
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    text = plan.title.ifBlank { "Task Plan" },
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = colors.primaryContent,
-                )
                 AgentoWebIcon(
                     glyph = AgentoWebGlyph.ChevronDown,
                     contentDescription = null,
                     modifier = Modifier
-                        .size(13.dp)
+                        .size(14.dp)
                         .rotate(if (expanded) 180f else 0f),
                     tint = colors.secondaryContent,
                 )
             }
+        },
+        modifier = modifier.clickable { expanded = !expanded },
+    ) {
+        if (totalCount > 0) {
+            AgentoProgressBar(
+                progress = doneCount.toFloat() / totalCount.toFloat(),
+                accentColor = colors.accentPrimary,
+            )
+        }
 
-            AnimatedVisibility(visible = expanded) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    plan.items.forEachIndexed { index, step ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                plan.items.forEach { step ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val isDone = step.status.equals("completed", ignoreCase = true)
+                        val inProgress = step.status.equals("in_progress", ignoreCase = true)
+
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        isDone -> colors.stateRunning
+                                        inProgress -> colors.accentPrimary
+                                        else -> colors.surfaceHigh
+                                    },
+                                ),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            val isDone = step.status.equals("completed", ignoreCase = true)
-                            val inProgress = step.status.equals("in_progress", ignoreCase = true)
-
-                            Box(
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        when {
-                                            isDone -> colors.stateRunning
-                                            inProgress -> colors.accentPrimary
-                                            else -> colors.surfaceLow
-                                        }
-                                    ),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (isDone) {
-                                    AgentoWebIcon(
-                                        glyph = AgentoWebGlyph.Check,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(10.dp),
-                                        tint = Color.White,
-                                    )
-                                }
+                            if (isDone) {
+                                AgentoWebIcon(
+                                    glyph = AgentoWebGlyph.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(10.dp),
+                                    tint = Color.White,
+                                )
                             }
-
-                            Text(
-                                text = step.text,
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp),
-                                color = if (isDone) colors.secondaryContent else colors.primaryContent,
-                            )
                         }
+
+                        Text(
+                            text = step.text,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 12.5.sp,
+                                fontWeight = if (inProgress) FontWeight.Medium else FontWeight.Normal,
+                            ),
+                            color = if (isDone) colors.secondaryContent else colors.primaryContent,
+                        )
                     }
                 }
             }
@@ -832,7 +896,7 @@ fun PlanBlock(
 }
 
 /**
- * TimelineArtifactBlock: Low-contrast solid Surface for file changes and diffs.
+ * TimelineArtifactBlock: Expressive artifact container for file changes and diffs.
  */
 @Composable
 fun TimelineArtifactBlock(
@@ -841,34 +905,56 @@ fun TimelineArtifactBlock(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalRagentColors.current
-    val isDark = colors.canvas.red < 0.5f
+    val totalAdditions = remember(files) { files.sumOf { it.additions } }
+    val totalDeletions = remember(files) { files.sumOf { it.deletions } }
 
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = if (isDark) Color(0xFF1C1C20) else Color(0xFFF4F4F6),
-        border = BorderStroke(0.5.dp, if (isDark) Color(0x26FFFFFF) else Color(0x14000000)),
+    AgentoArtifactSurface(
+        title = "${files.size} file${if (files.size > 1) "s" else ""} updated",
+        glyph = AgentoWebGlyph.File,
+        badge = if (totalAdditions > 0 || totalDeletions > 0) {
+            {
+                Row(
+                    modifier = Modifier
+                        .clip(AgentoShapes.PillShape)
+                        .background(colors.surfaceHigh)
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (totalAdditions > 0) {
+                        Text(
+                            text = "+$totalAdditions",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                            color = Ragentolors.Success,
+                        )
+                    }
+                    if (totalDeletions > 0) {
+                        Text(
+                            text = "-$totalDeletions",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                            color = colors.error,
+                        )
+                    }
+                }
+            }
+        } else null,
+        modifier = modifier,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                text = "${files.size} file${if (files.size > 1) "s" else ""} updated",
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.5.sp,
-                ),
-                color = colors.primaryContent,
-            )
-
             files.forEach { file ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(colors.surfaceHigh.copy(alpha = 0.5f))
                         .clickable {
                             onOpenFileDiff(
                                 FileDiffDetail(
@@ -876,13 +962,19 @@ fun TimelineArtifactBlock(
                                     additions = file.additions,
                                     deletions = file.deletions,
                                     diffContent = file.diffSummary,
-                                )
+                                ),
                             )
                         }
-                        .padding(vertical = 4.dp, horizontal = 4.dp),
+                        .padding(vertical = 7.dp, horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    AgentoWebIcon(
+                        glyph = AgentoWebGlyph.File,
+                        contentDescription = null,
+                        modifier = Modifier.size(13.dp),
+                        tint = colors.secondaryContent,
+                    )
                     Text(
                         text = file.name,
                         style = MaterialTheme.typography.bodySmall.copy(
@@ -903,7 +995,7 @@ fun TimelineArtifactBlock(
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
                                 ),
-                                color = Color(0xFF10B981),
+                                color = Ragentolors.Success,
                             )
                         }
                         if (file.deletions > 0) {

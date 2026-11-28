@@ -72,6 +72,7 @@ import com.andysagent.ragent.core.timeline.AttachmentItem
 import com.andysagent.ragent.core.agentui.AgentRunStatus
 import com.andysagent.ragent.core.agentui.RunStatus
 import com.andysagent.ragent.core.designsystem.AgentoBreathingDot
+import com.andysagent.ragent.core.designsystem.AgentoProgressBar
 import com.andysagent.ragent.core.designsystem.Ragentolors
 import com.andysagent.ragent.core.designsystem.AgentoShapes
 import com.andysagent.ragent.core.designsystem.AgentoSpacing
@@ -342,6 +343,37 @@ private fun RunMetricsSection(metrics: RunMetricsUiState, fileCount: Int, traceC
                         }
                     }
                 }
+        }
+
+        if (totalTokens > 0) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .testTag("run-context-budget-bar"),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                AgentoProgressBar(
+                    progress = (totalTokens.toFloat() / 200_000f).coerceIn(0.02f, 1f),
+                    accentColor = colors.accentPrimary,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.run_metric_tokens),
+                        style = RagentTextStyles.caption,
+                        color = colors.secondaryContent,
+                    )
+                    Text(
+                        text = "${metrics.promptTokens} in · ${metrics.completionTokens} out",
+                        style = RagentTextStyles.caption.copy(fontFamily = FontFamily.Monospace),
+                        color = colors.secondaryContent,
+                    )
+                }
+            }
         }
 
         val context = runContextPresentation(metrics)

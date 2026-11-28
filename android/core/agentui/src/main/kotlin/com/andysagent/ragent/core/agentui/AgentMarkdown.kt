@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -139,8 +140,8 @@ object AgentoMarkdownTokens {
     val InlineCodeTopMargin = 0.sp
     val InlineCodeBottomMargin = 0.sp
 
-    val InlineCodeBgLight = Color(0x0A000000)
-    val InlineCodeBgDark = Color(0x12FFFFFF)
+    val InlineCodeBgLight = Color(0xFFE7E9EF)
+    val InlineCodeBgDark = Color(0xFF1F222A)
     val InlineCodeStrokeLight = Color(0x14000000)
     val InlineCodeStrokeDark = Color(0x1FFFFFFF)
     val InlineCodeTextLight = Color(0xFF1F2328)
@@ -1072,6 +1073,7 @@ fun MarkdownBlockRenderer(
                         RagentodeBlock(
                             language = block.language,
                             code = block.text,
+                            isStreaming = isFrontierBlock,
                         )
                     }
                 }
@@ -1173,6 +1175,7 @@ fun RagentodeBlock(
     code: String,
     language: String?,
     modifier: Modifier = Modifier,
+    isStreaming: Boolean = false,
 ) {
     val colors = LocalRagentColors.current
     val clipboardManager = LocalClipboardManager.current
@@ -1181,6 +1184,11 @@ fun RagentodeBlock(
 
     val languageKey = remember(language) { normalizedCodeLanguage(language) }
     val displayLang = remember(language) { displayCodeLanguage(language) }
+
+    val codeLines = remember(code) { code.lines() }
+    val lineCount = codeLines.size
+    val canCollapse = !isStreaming && lineCount >= 48
+    var collapsed by remember(code) { mutableStateOf(false) }
 
     val isDark = colors.canvas.red < 0.5f
     val containerBg = if (isDark) Color(0xFF0E131B).copy(alpha = 0.94f) else Color(0xFFF7F8FA).copy(alpha = 0.95f)
@@ -1194,6 +1202,13 @@ fun RagentodeBlock(
 
     val highlightedText = remember(code, languageKey, isDark) {
         highlightCode(code, languageKey, isDark)
+    }
+    val previewHighlightedText = remember(code, languageKey, isDark, canCollapse, collapsed) {
+        if (canCollapse && collapsed) {
+            highlightCode(codeLines.take(18).joinToString("\n"), languageKey, isDark)
+        } else {
+            highlightedText
+        }
     }
 
     Surface(
@@ -1226,42 +1241,75 @@ fun RagentodeBlock(
                     ),
                 )
 
-                // The visible control stays compact while its touch target is
-                // kept at the spec's 28dp minimum.
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .agentoPressScale(
-                            pressedScale = 0.88f,
-                            onClick = {
-                                clipboardManager.setText(AnnotatedString(code))
-                                isCopied = true
-                                coroutineScope.launch {
-                                    delay(2000)
-                                    isCopied = false
-                                }
-                            },
-                        )
-                        .semantics {
-                            contentDescription = if (isCopied) "Copied" else "Copy code block"
-                        },
-                    contentAlignment = Alignment.Center,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    if (isCopied) {
-                        AgentoWebIcon(
-                            glyph = AgentoWebGlyph.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(13.dp),
-                            tint = if (isDark) Color(0xFF4E9B58) else Color(0xFF2F6B3C),
-                        )
-                    } else {
-                        AgentoWebIcon(
-                            glyph = AgentoWebGlyph.Copy,
-                            contentDescription = "Copy code block",
-                            modifier = Modifier.size(13.dp),
-                            tint = colors.secondaryContent,
-                        )
+                    if (canCollapse) {
+                        Box(
+                            modifier = Modifier
+                                .heightIn(min = 24.dp)
+                                .clip(CircleShape)
+                                .background(colors.primaryContent.copy(alpha = if (isDark) 0.09f else 0.06f))
+                                .agentoPressScale(
+                                    pressedScale = 0.94f,
+                                    onClick = { collapsed = !collapsed },
+                                )
+                                .padding(horizontal = 9.dp, vertical = 3.dp)
+                                .semantics {
+                                    contentDescription = if (collapsed) "Expand $lineCount lines" else "Collapse $lineCount lines"
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = if (collapsed) "Expand · ${lineCount}L" else "Collapse",
+                                style = TextStyle(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = colors.secondaryContent,
+                                ),
+                            )
+                        }
+                    }
+
+                    // The visible control stays compact while its touch target is
+                    // kept at the spec's 28dp minimum.
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .agentoPressScale(
+                                pressedScale = 0.88f,
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(code))
+                                    isCopied = true
+                                    coroutineScope.launch {
+                                        delay(2000)
+                                        isCopied = false
+                                    }
+                                },
+                            )
+                            .semantics {
+                                contentDescription = if (isCopied) "Copied" else "Copy code block"
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (isCopied) {
+                            AgentoWebIcon(
+                                glyph = AgentoWebGlyph.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = if (isDark) Color(0xFF4E9B58) else Color(0xFF2F6B3C),
+                            )
+                        } else {
+                            AgentoWebIcon(
+                                glyph = AgentoWebGlyph.Copy,
+                                contentDescription = "Copy code block",
+                                modifier = Modifier.size(13.dp),
+                                tint = colors.secondaryContent,
+                            )
+                        }
                     }
                 }
             }
@@ -1278,7 +1326,7 @@ fun RagentodeBlock(
                                 .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp),
                         ) {
                             Text(
-                                text = highlightedText,
+                                text = previewHighlightedText,
                                 style = RagentonversationTypography.Code.copy(textDirection = TextDirection.Ltr),
                                 softWrap = false,
                             )
@@ -1297,6 +1345,27 @@ fun RagentodeBlock(
                                 ),
                         )
                     }
+                }
+            }
+
+            if (canCollapse && collapsed) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(headerBg.copy(alpha = 0.72f))
+                        .clickable { collapsed = false }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Show all $lineCount lines",
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = colors.accentPrimary,
+                        ),
+                    )
                 }
             }
         }
@@ -2258,7 +2327,7 @@ private fun MarkdownTableBlock(
     Surface(
         shape = RoundedCornerShape(16.dp),
         border = tableBorder,
-        color = if (isDark) AgentoFrostedTokens.SurfaceLevel1.copy(alpha = 0.88f) else AgentoFrostedTokens.LightSurfaceLevel1.copy(alpha = 0.92f),
+        color = if (isDark) Color(0xFF181A20) else Color(0xFFF3F4F8),
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp)),

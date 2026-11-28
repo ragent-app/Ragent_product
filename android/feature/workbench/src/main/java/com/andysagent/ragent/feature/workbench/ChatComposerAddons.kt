@@ -9,6 +9,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -246,23 +247,29 @@ fun ComposerActionSheet(
                 }
             }
 
-            ComposerActionGroup {
-                ComposerActionRow(
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ComposerActionQuickTile(
                     title = stringResource(R.string.composer_action_images),
                     glyph = AgentoWebGlyph.Image,
+                    tint = colors.accentPrimary,
                     onClick = {
                         dismissSheet()
                         onPickImage()
                     },
+                    modifier = Modifier.weight(1f),
                 )
-                ComposerActionDivider()
-                ComposerActionRow(
+                ComposerActionQuickTile(
                     title = stringResource(R.string.composer_action_files),
                     glyph = AgentoWebGlyph.File,
+                    tint = Color(0xFF30D158),
                     onClick = {
                         dismissSheet()
                         onPickDocument()
                     },
+                    modifier = Modifier.weight(1f),
                 )
             }
 
@@ -314,7 +321,7 @@ fun ComposerActionSheet(
                 )
             }
 
-            val slashCommands = listOf("/goal", "/plan", "/schedule", "/grill-me", "/learn")
+            val slashCommands = listOf("/schedule", "/grill-me", "/learn")
             val commands: @Composable () -> Unit = {
                 slashCommands.forEach { cmd ->
                     Surface(
@@ -361,6 +368,64 @@ fun ComposerActionSheet(
             }
 
             Spacer(Modifier.height(10.dp))
+        }
+    }
+}
+
+@Composable
+private fun ComposerActionQuickTile(
+    title: String,
+    glyph: AgentoWebGlyph,
+    tint: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalRagentColors.current
+    val isDark = colors.canvas.red < 0.5f
+    val tileShape = RoundedCornerShape(18.dp)
+    Surface(
+        onClick = onClick,
+        shape = tileShape,
+        color = colors.primaryContent.copy(alpha = if (isDark) 0.055f else 0.032f),
+        border = BorderStroke(0.75.dp, colors.subtleOutline.copy(alpha = 0.45f)),
+        modifier = modifier
+            .heightIn(min = 68.dp)
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                contentDescription = title
+            },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(tint.copy(alpha = if (isDark) 0.20f else 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                AgentoWebIcon(
+                    glyph = glyph,
+                    contentDescription = null,
+                    modifier = Modifier.size(17.dp),
+                    tint = tint,
+                )
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+                color = colors.primaryContent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

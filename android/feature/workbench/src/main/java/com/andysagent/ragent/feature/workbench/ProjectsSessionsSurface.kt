@@ -8,6 +8,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -55,11 +57,13 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -84,6 +88,7 @@ import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
 import com.andysagent.ragent.core.designsystem.AgentoGlassSurface
 import com.andysagent.ragent.core.designsystem.AgentoGlassMaterial
 import com.andysagent.ragent.core.designsystem.AgentoShapes
+import com.andysagent.ragent.core.designsystem.AgentoSprings
 import com.andysagent.ragent.core.designsystem.AgentoStatusDot
 import com.andysagent.ragent.core.designsystem.AgentoStatusTone
 import com.andysagent.ragent.core.designsystem.AgentoSurface
@@ -399,6 +404,13 @@ private fun CompactProjectsSurface(
                     }
                 }
             } else {
+                val recentSessions = remember(state.sessions, state.sessionSearchQuery) {
+                    if (state.sessionSearchQuery.isNotBlank()) emptyList()
+                    else state.sessions
+                        .filter { it.latestSeq > 0 }
+                        .sortedWith(compareByDescending<Session> { it.updatedAt }.thenByDescending { it.latestSeq })
+                        .take(4)
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f).fillMaxWidth().testTag("projects-index-list"),
@@ -410,6 +422,17 @@ private fun CompactProjectsSurface(
                     ),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    if (recentSessions.isNotEmpty()) {
+                        item(key = "recent-chats-section") {
+                            RecentSessionsQuickSection(
+                                sessions = recentSessions,
+                                selectedSessionId = state.sessionId,
+                                onSelectSession = { sessionId ->
+                                    onEvent(WorkbenchEvent.SelectSession(sessionId))
+                                },
+                            )
+                        }
+                    }
                     items(groups, key = { it.project.id }) { group ->
                         val isActionPending = state.pendingProjectActionId == group.project.id
                         ProjectIndexSection(
@@ -929,6 +952,112 @@ private fun SessionsHeader(
             placeholder = stringResource(R.string.projects_search_sessions), tag = "projects-index-search",
         )
 
+    }
+}
+
+@Composable
+private fun RecentSessionsQuickSection(
+    sessions: List<Session>,
+    selectedSessionId: String?,
+    onSelectSession: (String) -> Unit,
+) {
+    val colors = LocalRagentColors.current
+    val isDark = colors.canvas.red < 0.5f
+    val cardShape = RoundedCornerShape(16.dp)
+    val cardBg = if (isDark) Color(0xFF2C2C2E) else Color.White
+    var expanded by rememberSaveable { mutableStateOf(true) }
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 0f else -90f,
+        animationSpec = AgentoSprings.snappy(),
+        label = "recent_chevron",
+    )
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            AgentoWebIcon(
+                glyph = AgentoWebGlyph.Clock,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = colors.accentPrimary,
+            )
+            Text(
+                text = stringResource(R.string.projects_recent),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = colors.secondaryContent,
+            )
+            AgentoWebIcon(
+                glyph = AgentoWebGlyph.ChevronDown,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(14.dp)
+                    .rotate(chevronRotation),
+                tint = colors.tertiaryContent,
+            )
+        }
+
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .clip(cardShape)
+                    .background(cardBg),
+            ) {
+                sessions.forEachIndexed { index, session ->
+                    val selected = session.id == selectedSessionId
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .background(if (selected) colors.primaryContent.copy(alpha = 0.045f) else Color.Transparent)
+                            .agentoPressScale(pressedScale = 0.985f, onClick = { onSelectSession(session.id) })
+                            .testTag("recent-chat-row-${session.id}")
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        AgentoWebIcon(
+                            glyph = AgentoWebGlyph.ChatBubble,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp),
+                            tint = if (selected) colors.accentPrimary else colors.secondaryContent,
+                        )
+                        Text(
+                            text = session.title,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            ),
+                            color = colors.primaryContent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (index < sessions.lastIndex) {
+                        HorizontalDivider(
+                            thickness = 0.5.dp,
+                            color = if (isDark) Color(0xFF38383A) else Color(0xFFE5E5EA),
+                            modifier = Modifier.padding(start = 39.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
